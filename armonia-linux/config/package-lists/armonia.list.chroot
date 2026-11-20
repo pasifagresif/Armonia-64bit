@@ -1,9 +1,47 @@
-# Armonia Faz 1 — asgari paket listesi (apt-recommends kapalı). Claude, 2026-11-13.
+# Armonia paket listesi (apt-recommends kapalı). Claude, 2026-11-13; 2026-11-19 temel masaüstü (Çoklu UYAP yok).
 # Oturum ve kabuk
 dbus
 libpam-systemd
 labwc
-# ÇokluUYAP (egui/glow) Wayland + yazılım GL (GPU yoksa llvmpipe)
+# Giriş yöneticisi (canlıda otomatik giriş; agreety metin girişi greetd paketinde)
+greetd
+# Masaüstü: arka plan, üst çubuk + dock, "A" menüsü, bildirim, boşta/kilit, ekran aç-kapa
+swaybg
+waybar
+fuzzel
+mako-notifier
+libnotify-bin
+# Kullanicinin yeniden baslat/kapat yetkisi (logind: etkin yerel oturum) ve e-imza pcscd kurali
+polkitd
+# Armonia Ayarlar'in dar yetkili yardimcisi (ayar-yardimci) pkexec ile; genel sudo yok
+pkexec
+swayidle
+swaylock
+wlr-randr
+adwaita-icon-theme
+xdg-user-dirs
+locales
+# Dosya yöneticisi, PDF, ofis
+thunar
+# USB bellek: izin verilince Thunar'da gorunur ve baglanir (nosuid,nodev; polkit: etkin yerel oturum)
+udisks2
+gvfs
+# Yazdirma: yalniz surucusuz yol imajda (IPP Everywhere / IPP-over-USB). Surucu paketleri IMAJA KONMAZ
+# (kullanici karari 19.11): kurulumda tespit edilen donanim icin secilir, sonradan takilan icin onayla indirilir.
+cups-daemon
+cups-client
+cups-filters
+cups-ipp-utils
+ipp-usb
+# Donanim -> paket eslemesi (Debian): surucu.sh ve kurulumdaki surucu secimi kullanir
+isenkram-cli
+evince
+libreoffice-writer
+libreoffice-calc
+libreoffice-gtk3
+libreoffice-l10n-tr
+fonts-liberation2
+# Wayland + GL (GPU yoksa llvmpipe)
 libegl1
 libegl-mesa0
 libgl1
@@ -16,12 +54,14 @@ xkb-data
 fonts-dejavu-core
 # olcum betigi (pgrep, ps, free)
 procps
-# Ağ (DHCP) ve TLS kökleri
+# Ağ: NetworkManager (kablolu + Wi-Fi; 19.11'de networkd'den geçildi), DNS systemd-resolved, TLS kökleri
+network-manager
+wpasupplicant
 systemd-resolved
 ca-certificates
 # Guvenlik duvari (Faz 3)
 nftables
-# Faz 2 kasa
+# Disk şifreleme (diske kurulum, A6)
 cryptsetup
 systemd-cryptsetup
 # Konsol/Plymouth klavye duzeni (TR)
@@ -29,9 +69,7 @@ keyboard-configuration
 console-setup
 plymouth
 plymouth-label
-# Faz 2: zincirleme dosya verileri icin PostgreSQL (veri kasada, yalniz Sunucu rolunde calisir)
-postgresql
-# Faz 3: AppArmor (uyap_app profili sertlestirme/etc/apparmor.d)
+# PostgreSQL ve uyap_app AppArmor profili Çoklu UYAP katmanıyla gelecek (cokluuyap-katmani/, kasa/)
 apparmor
 # Tarayici (kullanici karari 2026-11-14: Debian chromium + yonetilen politika). Ayri birim: armonia-tarayici@.service
 chromium
@@ -41,7 +79,7 @@ chromium-l10n
 netcat-openbsd
 # USB aygit politikasi (kullanici karari 2026-11-14: A / sıkı)
 usbguard
-# Ses (E-Durusma mikrofon/kulaklik; kullanici karari 2026-11-14): PipeWire kiosk'un systemd --user oturumunda,
+# Ses (E-Durusma mikrofon/kulaklik; kullanici karari 2026-11-14): PipeWire kullanicinin systemd --user oturumunda,
 # Chromium PulseAudio arayuzuyle /run/user/<uid>/pulse/native soketine baglanir
 pipewire
 pipewire-pulse
@@ -56,7 +94,7 @@ libpcsclite1
 # E-imza istemcisi ayarlar penceresini (Swing AyarlarUI) acilista kurar; ekransiz (headless) calisamiyor
 # (HeadlessException, Hyper-V 14 Kasim 11:40). Yalniz armonia-eimza.service icinde gorunmez X (Xvfb), xvfb-run icin
 # xauth, Xvfb klavye haritasi icin xkbcomp. Ekrana bagli X sunucusu YOK. NOT (guvenlik-denetci O-X1): xwayland
-# paketi labwc bagimliligi olarak KURULU (ikili var, calismiyor); kiosk X0 soketi olcum.sh ile denetleniyor.
+# paketi labwc bagimliligi olarak KURULU (ikili var, calismiyor); X0 soketi olcum.sh ile denetleniyor.
 xvfb
 xauth
 x11-xkb-utils

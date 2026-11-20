@@ -1,0 +1,21 @@
+# Sonradan takilan aygit icin surucu / yazici kurulumu (plan A5b). Ornek: <vid>-<pid>[-yazici].
+# armonia-usb-sor.service, kullanici aygita izin verince baslatir. Root; apt ve ag gerektigi icin genis yetkili,
+# ama yalniz surucu.sh'in izin listesindeki paketleri, kullanici onayiyla kurar. Claude, 2026-11-19.
+[Unit]
+Description=Armonia: %i icin surucu
+After=network-online.target cups.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/armonia/bin/surucu.sh %i
+TimeoutStartSec=20min
+ProtectHome=read-only
+ReadWritePaths=-/run/user
+TasksMax=64
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+RestrictRealtime=yes
+LockPersonality=yes

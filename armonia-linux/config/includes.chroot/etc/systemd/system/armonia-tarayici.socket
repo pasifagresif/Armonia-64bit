@@ -1,12 +1,12 @@
-# Armonia: kiosk'taki uyap_app'in tarayici acma istegi (tek satir URL). Her baglanti icin bir
-# armonia-tarayici@.service ornegi baslar. Yalniz kiosk kullanicisi yazabilir. Claude, 2026-11-14.
+# Armonia: masaustunun tarayici acma istegi (xdg-open, tek satir URL). Her baglanti icin bir
+# armonia-tarayici@.service ornegi baslar. Yalniz 'armonia' kullanicisi yazabilir. Claude, 2026-11-14 / 11-19.
 [Unit]
 Description=Armonia tarayici istek soketi
 
 [Socket]
 ListenStream=/run/armonia-tarayici.sock
-SocketUser=kiosk
-SocketGroup=kiosk
+SocketUser=armonia
+SocketGroup=armonia
 SocketMode=0600
 Accept=yes
 # Ard arda tiklamada servis firtinasi olmasin

@@ -1,22 +1,25 @@
-# Armonia: Chromium (Debian paketi + /etc/chromium/policies/managed/armonia.json), kiosk kullanicisinin
-# Wayland oturumunda. Kiosk servisinden AYRI kum havuzu: Chromium kendi namespace + seccomp-bpf kum havuzunu
+# Armonia: Chromium (Debian paketi + /etc/chromium/policies/managed/armonia.json), masaustu kullanicisinin (armonia)
+# Wayland oturumunda. Masaustu oturumundan AYRI kum havuzu: Chromium kendi namespace + seccomp-bpf kum havuzunu
 # kurabilsin diye 'user pid net' ad alanlarina ve chroot/capset'e izin verilir; geri kalan systemd kisitlari
-# kiosk birimiyle ayni cizgide. Ilk istek tarayiciyi baslatir (bu ornek tarayici kapanana kadar yasar);
+# eski kiosk birimiyle ayni cizgide. Ilk istek tarayiciyi baslatir (bu ornek tarayici kapanana kadar yasar);
 # sonraki istekler Chromium'un tekil-ornek (singleton) soketiyle acik pencereye iletilir ve hemen biter
 # (singleton soketi PrivateTmp disinda, TMPDIR=profil/tmp — guvenlik-denetci O1).
-# Claude, 2026-11-14.
+# Claude, 2026-11-14. 2026-11-19: kiosk -> masaustu (kullanici 'armonia', internete adli siteler, e-imza 5975).
 [Unit]
 Description=Armonia tarayici (Chromium)
 CollectMode=inactive-or-failed
+# nftables yeniden yuklenirse (flush ruleset) tarayici kurallari kaybolmasin: tarayici da kapanir (denetci 19.11 O6)
+After=nftables.service
+PartOf=nftables.service
 
 [Service]
 Type=simple
-User=kiosk
-Group=kiosk
+User=armonia
+Group=armonia
 StandardInput=socket
 StandardOutput=journal
 StandardError=journal
-# guvenlik-denetci E-Y1: kendi dilimi + baslarken 5975/8843 ret kurali (slice ancak simdi var, cgroup yolu cozulur)
+# guvenlik-denetci E-Y1: kendi dilimi + baslarken nft kurallari (yerel kapilar/LAN kapali; slice ancak simdi var)
 Slice=armonia-tarayici.slice
 ExecStartPre=+/usr/sbin/nft -f /opt/armonia/nft/tarayici_yerel.nft
 ExecStart=/opt/armonia/bin/tarayici.sh
@@ -26,28 +29,33 @@ TimeoutStopSec=5
 
 NoNewPrivileges=yes
 ProtectSystem=strict
-# Profil/onbellek kasada (kasa yoksa RAM); Wayland soketi /run/user/<uid>; indirmeler Evrak klasorune
-ReadWritePaths=-/var/lib/armonia/CokluUyap/chromium -/var/lib/armonia/CokluUyap/Evrak
+# Ev dizini bos bir tmpfs; icine yalniz tarayici profili ve Indirilenler (yazilabilir) ile Belgeler (UYAP'a
+# evrak yuklemek icin, SALT OKUNUR) baglanir. Kullanicinin diger dosyalari tarayicidan gorunmez.
+ProtectHome=tmpfs
+# '-' YOK: dizin yoksa birim baslamasin (indirmeler sessizce tmpfs'e gidip kaybolmasin; hook dizinleri acar)
+BindPaths=/home/armonia/.local/share/armonia-tarayici /home/armonia/İndirilenler
+BindReadOnlyPaths=/home/armonia/Belgeler
 # guvenlik-denetci EK-Y1: /run/user bos bir tmpfs; icine yalniz wayland-0, pulse/native, pipewire-0 soketleri
 # baglanir (hook'un UID'yi yazdigi 20-calisma.conf). Kiosk'un D-Bus oturum veriyolu ve systemd --user
 # soketleri bu birimde YOK (StartTransientUnit ile kum havuzundan kacis kapali).
 TemporaryFileSystem=/run/user:mode=0755
 PrivateTmp=yes
-InaccessiblePaths=-/home -/root -/srv/kasa -/var/lib/armonia/cokluuyap -/var/lib/armonia/CokluUyap/config
-# guvenlik-denetci Y1: User=kiosk ek gruplari (postgres, input) da getirir; bu birimde AppArmor yok ->
-# PostgreSQL soketi ve klavye olaylari (PIN!) kapatilir. /run/user/<uid>/bus: hook'un 20-bus.conf'u (Y2).
+InaccessiblePaths=-/root -/srv/kasa -/var/lib/armonia
+# guvenlik-denetci Y1: kullanicinin ek gruplari bu birime de gelir; bu birimde AppArmor yok ->
+# PostgreSQL soketi ve klavye olaylari (PIN!) kapatilir.
 InaccessiblePaths=-/run/postgresql -/run/armonia -/dev/input -/run/pcscd
-# guvenlik-denetci O1: resolved stub/varlink soketi tarayicidan gorunmesin (DNS gerekmiyor; nft 53 reddi ile birlikte)
-InaccessiblePaths=-/run/systemd/resolve
+# DNS artik gerekli (adli siteler): resolv.conf -> /run/systemd/resolve/stub-resolv.conf okunur, sorgu UDP ile
+# 127.0.0.53'e gider (nft yalniz bunu acar). resolved'un varlink yonetim soketleri gorunmez.
+InaccessiblePaths=-/run/systemd/resolve/io.systemd.Resolve -/run/systemd/resolve/io.systemd.Resolve.Monitor
 DevicePolicy=closed
 # GPU (DRM) ve E-Durusma kamera (V4L2). Ses /dev/snd ile DEGIL, PipeWire soketiyle (EK-O1).
 DeviceAllow=char-drm rw
 DeviceAllow=char-video4linux rw
-# guvenlik-denetci Y3: tarayici yalniz yerel vekile (127.0.0.1:8800) baglanir; UYAP'a dogrudan cikis vekili ve
-# kill-switch'i atlatirdi. E-Durusma goruntusu dis bir medya/TURN sunucusuna gidiyorsa gercek testte
-# o adresler IPAddressAllow= ile acilacak (DOGRULANMADI).
+# Internet acik (siteleri politika suzer), yerel ag kapali. Yerel kapilar (5975 disi) nft ile kapali.
+# IPAddressAllow, Deny'dan once gelir: localhost acik, LAN/link-local/CGNAT/cok-noktali yayin kapali.
+# E-Durusma (WebRTC medya/TURN) gercek denemede dogrulanacak (DOGRULANMADI).
 IPAddressAllow=localhost
-IPAddressDeny=any
+IPAddressDeny=link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
 LimitCORE=0
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

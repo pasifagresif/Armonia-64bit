@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!-- Armonia masaustu labwc ayari. Claude, 2026-11-14 (kiosk), 2026-11-19 (masaustu: dock, sinirli kisayol).
+     Ayar /etc/armonia/labwc'de (root'a ait); oturum.sh labwc'yi -C ile buradan baslatir, kullanici degistiremez. -->
+<labwc_config>
+  <core>
+    <xwaylandPersistence>no</xwaylandPersistence>
+  </core>
+  <theme>
+    <name></name>
+    <cornerRadius>8</cornerRadius>
+    <font place="ActiveWindow"><name>DejaVu Sans</name><size>10</size><weight>bold</weight></font>
+    <font place="InactiveWindow"><name>DejaVu Sans</name><size>10</size></font>
+    <font place="MenuItem"><name>DejaVu Sans</name><size>10</size></font>
+    <titlebar>
+      <layout>:iconify,max,close</layout>
+    </titlebar>
+  </theme>
+  <!-- <default/> YOK: yalniz asagidaki kisayollar var. Terminal, cikis (Exit), yapilandirma yeniden yukleme YOK. -->
+  <keyboard>
+    <layout>tr</layout>
+    <!-- labwc 0.8.3'ten beri Num Lock varsayilan olarak ayarlanmiyor (#2483) -->
+    <numlock>on</numlock>
+    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+    <keybind key="A-S-Tab"><action name="PreviousWindow"/></keybind>
+    <keybind key="A-F4"><action name="Close"/></keybind>
+    <keybind key="Super_L" onRelease="yes"><action name="Execute" command="/opt/armonia/bin/menu.sh"/></keybind>
+    <keybind key="W-l"><action name="Execute" command="/opt/armonia/bin/kilitle.sh"/></keybind>
+    <keybind key="W-Up"><action name="ToggleMaximize"/></keybind>
+    <keybind key="W-Down"><action name="Iconify"/></keybind>
+    <keybind key="XF86AudioRaiseVolume"><action name="Execute" command="wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"/></keybind>
+    <keybind key="XF86AudioLowerVolume"><action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"/></keybind>
+    <keybind key="XF86AudioMute"><action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"/></keybind>
+  </keyboard>
+  <mouse>
+    <default/>
+    <!-- Masaustune tik: menu yok (simge yok, widget'lar sonraki asamada) -->
+    <context name="Root">
+      <mousebind button="Left" action="Press"><action name="None"/></mousebind>
+      <mousebind button="Right" action="Press"><action name="None"/></mousebind>
+      <mousebind button="Middle" action="Press"><action name="None"/></mousebind>
+    </context>
+  </mouse>
+  <windowRules>
+    <windowRule identifier="chromium*" serverDecoration="yes"/>
+  </windowRules>
+</labwc_config>

@@ -1,0 +1,6 @@
+# Armonia: web adresleri kum havuzlu tarayici birimine (xdg-open -> armonia-tarayici.sock). Claude, 2026-11-19.
+[Default Applications]
+x-scheme-handler/http=armonia-tarayici.desktop
+x-scheme-handler/https=armonia-tarayici.desktop
+text/html=armonia-tarayici.desktop
+application/pdf=org.gnome.Evince.desktop

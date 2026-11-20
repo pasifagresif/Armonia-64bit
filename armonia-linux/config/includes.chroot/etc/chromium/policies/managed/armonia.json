@@ -1,7 +1,75 @@
 {
-  "URLBlocklist": ["*"],
-  "URLAllowlist": ["http://127.0.0.1:8800", "chrome://print",
-                   "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai"],
+  "URLBlocklist": [
+    "*"
+  ],
+  "URLAllowlist": [
+    "https://uyap.gov.tr",
+    "https://adalet.gov.tr",
+    "https://turkiye.gov.tr",
+    "https://yargitay.gov.tr",
+    "https://danistay.gov.tr",
+    "https://anayasa.gov.tr",
+    "https://uyusmazlik.gov.tr",
+    "https://resmigazete.gov.tr",
+    "https://mevzuat.gov.tr",
+    "https://hsk.gov.tr",
+    "https://barobirlik.org.tr",
+    "https://istanbulbarosu.org.tr",
+    "https://ankarabarosu.org.tr",
+    "https://izmirbarosu.org.tr",
+    "https://www.google.com/recaptcha",
+    "https://www.gstatic.com/recaptcha",
+    "chrome://print",
+    "chrome://downloads",
+    "chrome://newtab",
+    "chrome://new-tab-page",
+    "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai"
+  ],
+  "LocalNetworkAccessAllowedForUrls": [
+    "https://avukat.uyap.gov.tr"
+  ],
+  "HomepageLocation": "https://avukat.uyap.gov.tr/",
+  "HomepageIsNewTabPage": false,
+  "ShowHomeButton": true,
+  "RestoreOnStartup": 4,
+  "RestoreOnStartupURLs": [
+    "https://avukat.uyap.gov.tr/"
+  ],
+  "NewTabPageLocation": "https://avukat.uyap.gov.tr/",
+  "BookmarkBarEnabled": true,
+  "ManagedBookmarks": [
+    {
+      "toplevel_name": "Adli siteler"
+    },
+    {
+      "name": "UYAP Avukat Portalı",
+      "url": "https://avukat.uyap.gov.tr/"
+    },
+    {
+      "name": "e-Devlet",
+      "url": "https://www.turkiye.gov.tr/"
+    },
+    {
+      "name": "UYAP Emsal Karar",
+      "url": "https://emsal.uyap.gov.tr/"
+    },
+    {
+      "name": "Yargıtay Karar Arama",
+      "url": "https://karararama.yargitay.gov.tr/"
+    },
+    {
+      "name": "Mevzuat",
+      "url": "https://www.mevzuat.gov.tr/"
+    },
+    {
+      "name": "Resmî Gazete",
+      "url": "https://www.resmigazete.gov.tr/"
+    },
+    {
+      "name": "Türkiye Barolar Birliği",
+      "url": "https://www.barobirlik.org.tr/"
+    }
+  ],
   "BrowserSignin": 0,
   "SyncDisabled": true,
   "PasswordManagerEnabled": false,
@@ -22,12 +90,18 @@
   "IncognitoModeAvailability": 1,
   "BrowserGuestModeEnabled": false,
   "BrowserAddPersonEnabled": false,
-  "ExtensionInstallBlocklist": ["*"],
+  "ExtensionInstallBlocklist": [
+    "*"
+  ],
   "AllowFileSelectionDialogs": true,
-  "DownloadDirectory": "/var/lib/armonia/CokluUyap/Evrak",
+  "DownloadDirectory": "/home/armonia/İndirilenler",
   "PromptForDownloadLocation": false,
   "DefaultNotificationsSetting": 2,
   "DefaultGeolocationSetting": 2,
-  "VideoCaptureAllowedUrls": ["http://127.0.0.1:8800"],
-  "AudioCaptureAllowedUrls": ["http://127.0.0.1:8800"]
+  "VideoCaptureAllowedUrls": [
+    "https://*.uyap.gov.tr"
+  ],
+  "AudioCaptureAllowedUrls": [
+    "https://*.uyap.gov.tr"
+  ]
 }

@@ -1,15 +1,14 @@
 #!/bin/sh
-# Armonia: uyap_app'in "Tarayiciyi Ac" cagrisi (Command::new("xdg-open")). Chromium'u BURADA baslatmaz:
-# kiosk servisinin kum havuzu (RestrictNamespaces, seccomp) Chromium'un kendi kum havuzuna izin vermez ve
-# gevsetilmesin diye tarayici ayri bir birimde (armonia-tarayici@.service) calisir. Bu betik yalniz adresi
-# denetleyip root'un actigi Unix soketine (0600 kiosk) yazar. Adres serviste YENIDEN denetlenir.
-# Claude, 2026-11-14.
+# Armonia: masaustundeki "web adresi ac" istekleri (dock, LibreOffice baglantilari, mimeapps). Chromium'u BURADA
+# baslatmaz: tarayici kendi kum havuzlu biriminde (armonia-tarayici@.service) calisir. Bu betik yalniz adresi
+# denetleyip root'un actigi Unix soketine (0600 armonia) yazar; adres serviste YENIDEN denetlenir, hangi sitelerin
+# acilacagina Chromium politikasi (URLAllowlist, adli siteler) karar verir. Claude, 2026-11-14 / 2026-11-19.
 case "$1" in
-  http://127.0.0.1:8800/*) ;;
-  *) echo "xdg-open: izin verilmeyen adres" >&2; exit 1 ;;
+  https://*|http://*) ;;
+  *) notify-send -a Armonia "Açılamadı" "Yalnız web adresleri tarayıcıda açılır." 2>/dev/null
+     echo "xdg-open: yalniz http(s) adresleri" >&2; exit 1 ;;
 esac
 # Satir sonu/bosluk iceren adres reddedilir (tek satir protokolu)
 case "$1" in *[[:space:]]*) echo "xdg-open: gecersiz adres" >&2; exit 1 ;; esac
-# -w 2: Accept=yes'te kabul edilen baglantiyi systemd (PID 1) birim bitene, yani tarayici kapanana dek acik tutar;
-# nc yanit beklemeden 2 sn bosta kalinca cikar (Hyper-V 14 Kasim 12:25: -w olmadan olcum 10 sn zaman asimina dustu)
+# -w 2: Accept=yes'te systemd baglantiyi tarayici kapanana dek acik tutar; nc 2 sn bosta kalinca cikar
 printf '%s\n' "$1" | exec /usr/bin/nc.openbsd -N -w 2 -U /run/armonia-tarayici.sock

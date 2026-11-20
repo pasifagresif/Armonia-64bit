@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Armonia: LibreOffice makrolari kapali ve kullanici tarafindan degistirilemez (finalized). Kotu niyetli belgedeki
+     Basic makrosu Shell() ile komut calistiramasin (guvenlik-denetci 19.11 Y1). Claude, 2026-11-19. -->
+<oor:data xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:oor="http://openoffice.org/2001/registry">
+  <dependency file="main"/>
+  <oor:component-data oor:name="Common" oor:package="org.openoffice.Office">
+    <node oor:name="Security">
+      <node oor:name="Scripting">
+        <prop oor:name="MacroSecurityLevel" oor:finalized="true"><value>3</value></prop>
+        <prop oor:name="DisableMacrosExecution" oor:finalized="true"><value>true</value></prop>
+      </node>
+    </node>
+  </oor:component-data>
+</oor:data>

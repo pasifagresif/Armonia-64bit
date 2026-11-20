@@ -1,20 +1,28 @@
 #!/bin/sh
-# Armonia Faz 1 chroot ayarlari: kiosk kullanicisi, servisler, gereksiz zamanlayicilar. Claude, 2026-11-13.
+# Armonia chroot ayarlari: masaustu kullanicisi, servisler, gereksiz zamanlayicilar. Claude, 2026-11-13.
+# 2026-11-19: kiosk (uyap_app acilista) -> temel masaustu. Coklu UYAP, kasa ve PostgreSQL bu imajda YOK.
 set -e
-# Kiosk kullanicisi: parolasiz (kilitli), etkilesimli kabuk yok, sudo yok.
-useradd --system --home-dir /var/lib/armonia --create-home --shell /usr/sbin/nologin \
-        --groups video,render,input kiosk
-# Ev dizini includes.chroot'tan (labwc ayarlari) once olusmus olabilir: dizini kiosk'a ver,
-# .config ise root'ta kalsin (kiosk kendi kabuk ayarini degistiremez).
-chown kiosk:kiosk /var/lib/armonia; chmod 0700 /var/lib/armonia
-chown -R root:root /var/lib/armonia/.config; chmod -R u=rwX,go=rX /var/lib/armonia/.config
-install -d -o kiosk -g kiosk -m 0700 /var/lib/armonia/cokluuyap
-# XDG_CONFIG_HOME + evrak klasoru (kasa yoksa RAM'de; kasa baglaninca kasadakiler ustune gelir)
-install -d -o kiosk -g kiosk -m 0700 /var/lib/armonia/CokluUyap /var/lib/armonia/CokluUyap/config /var/lib/armonia/CokluUyap/Evrak /var/lib/armonia/CokluUyap/chromium
-ln -sfn /opt/armonia/cokluuyap/webapp /var/lib/armonia/cokluuyap/webapp
+# Canli sistemin masaustu kullanicisi: parolasiz (kilitli; greetd otomatik giris), sudo yok, ek grup yok
+# (ekran/ses/giris aygitlarina erisim logind oturumundan gelir). Kurulu sistemde Calamares kendi kullanicisini acar (A6).
+useradd --create-home --home-dir /home/armonia --shell /bin/bash --comment "Armonia" armonia
+passwd -l armonia
+chmod 0700 /home/armonia
+# Belgeler / Indirilenler (xdg-user-dirs Turkce adlar) ve tarayici profili: tarayici birimi bunlari baglar
+for d in .config .local .local/share .local/share/armonia-tarayici Belgeler İndirilenler; do
+  install -d -o armonia -g armonia -m 0700 "/home/armonia/$d"
+done
+printf 'XDG_DOCUMENTS_DIR="$HOME/Belgeler"\nXDG_DOWNLOAD_DIR="$HOME/İndirilenler"\n' > /home/armonia/.config/user-dirs.dirs
+chown armonia:armonia /home/armonia/.config/user-dirs.dirs
+# Turkce yerel ayar (saat/tarih, LibreOffice, menuler)
+sed -i 's/^# *tr_TR.UTF-8 UTF-8/tr_TR.UTF-8 UTF-8/' /etc/locale.gen
+locale-gen
+printf 'LANG=tr_TR.UTF-8\n' > /etc/default/locale
+printf 'LANG=tr_TR.UTF-8\n' > /etc/locale.conf
+# Masaustu ayarlari root'a ait, kullanici degistiremez (/etc/armonia: labwc, waybar, fuzzel, mako)
+chown -R root:root /opt/armonia /etc/armonia
 chmod 0755 /opt/armonia/bin/*.sh
-chown -R root:root /opt/armonia
-chmod -R go-w /opt/armonia /etc/systemd/system/armonia-*.service /etc/systemd/network
+chmod -R go-w /opt/armonia /etc/armonia /etc/systemd/system/armonia-*.service /etc/NetworkManager/conf.d
+chmod 0755 /opt/armonia/bin/ayar-yardimci
 # Denetim: kok dosya sisteminde herkese-yazilabilir dosya kalmasin (sticky /tmp haric)
 if find / -xdev -type f -perm -0002 2>/dev/null | grep -q .; then
   echo "UYARI: herkese-yazilabilir dosyalar:"; find / -xdev -type f -perm -0002 2>/dev/null | head
@@ -22,17 +30,27 @@ fi
 ln -sf /usr/share/zoneinfo/Europe/Istanbul /etc/localtime
 printf '127.0.0.1 localhost\n127.0.1.1 armonia\n' > /etc/hosts
 systemctl set-default graphical.target
-systemctl enable armonia-kiosk.service armonia-olcum.service systemd-networkd.service systemd-resolved.service nftables.service
-# Tarayici istek soketi (Chromium kiosk biriminin disinda, kendi kum havuzunda) ve USB aygit politikasi
-systemctl enable armonia-tarayici.socket usbguard.service
+systemctl enable greetd.service NetworkManager.service systemd-resolved.service nftables.service
+# Ag yonetimi NetworkManager'da (19.11); networkd ayni arayuzu yonetmesin
+systemctl disable systemd-networkd.service systemd-networkd.socket 2>/dev/null || true
+systemctl mask NetworkManager-wait-online.service
+# armonia-olcum yalniz olcum ISO'sunda calisir (ConditionKernelCommandLine)
+systemctl enable armonia-olcum.service
+# Tarayici istek soketi (Chromium masaustu oturumunun disinda, kendi kum havuzunda) ve USB aygit politikasi
+systemctl enable armonia-tarayici.socket usbguard.service armonia-usb-sor.service
+# ipp-usb paket bagimliligi avahi-daemon'u getirir: yazicilar agda duyurulmaz, mDNS kapisi acilmaz
+systemctl mask avahi-daemon.service avahi-daemon.socket
+grep -q '^  dns-sd = disable' /etc/ipp-usb/ipp-usb.conf || { echo "HATA: ipp-usb ayari Armonia surumu degil"; exit 1; }
 # trixie'de usbguard-dbus ayni pakette ve kendini etkinlestiriyor: D-Bus/Polkit uzerinden kural degistirme yuzeyi
-# (Gemini taslagi da kurulmamasini istiyordu). Kiosk'ta yonetim yalniz root CLI ile.
+# (Gemini taslagi da kurulmamasini istiyordu). Yonetim yalniz root CLI ile (A5'te "takinca sor" yardimcisi).
 systemctl mask usbguard-dbus.service
-# guvenlik-denetci Y2: tarayici birimi kiosk'un systemd --user / D-Bus soketlerine erisemesin
+# guvenlik-denetci Y2: tarayici birimi kullanicinin systemd --user / D-Bus soketlerine erisemesin
 # (StartTransientUnit ile kum havuzu disinda komut). %U system biriminde 0'a cozulur -> UID burada yazilir.
-U=$(id -u kiosk); install -d -m 0755 /etc/systemd/system/armonia-tarayici@.service.d
-printf '# Hook uretti (kiosk UID=%s). guvenlik-denetci Y2/EK-Y1: /run/user tmpfs icine yalniz bu soketler.\n[Service]\nBindPaths=/run/user/%s/wayland-0 -/run/user/%s/pulse/native -/run/user/%s/pipewire-0\n' \
+U=$(id -u armonia); install -d -m 0755 /etc/systemd/system/armonia-tarayici@.service.d
+printf '# Hook uretti (armonia UID=%s). guvenlik-denetci Y2/EK-Y1: /run/user tmpfs icine yalniz bu soketler.\n[Service]\nBindPaths=/run/user/%s/wayland-0 -/run/user/%s/pulse/native -/run/user/%s/pipewire-0\n' \
   "$U" "$U" "$U" "$U" > /etc/systemd/system/armonia-tarayici@.service.d/20-calisma.conf
+# Chromium'un kendi menu girisi gizli (/usr/local/share/applications/chromium.desktop); varsayilan tarayici
+# armonia-tarayici.desktop (/etc/xdg/mimeapps.list)
 # E-imza (Adalet E-imza, config/packages.chroot/adalet-eimza-tray_*.deb): ayri sistem kullanicisi, gruplarsiz
 if [ -x /usr/lib/adalet-eimza-tray/bin/adalet-eimza-tray ]; then
   useradd --system --no-create-home --home-dir /var/lib/armonia-eimza --shell /usr/sbin/nologin eimza
@@ -43,51 +61,44 @@ if [ -x /usr/lib/adalet-eimza-tray/bin/adalet-eimza-tray ]; then
   systemctl enable armonia-eimza.service pcscd.socket
   # E-O4: paketin apt deposu / --user birimi imajda kalmamali
   if ls /etc/apt/sources.list.d/ /usr/lib/systemd/user/ | grep -qi eimza; then echo "HATA: e-imza deposu/birimi kaldi"; exit 1; fi
+elif [ "${ARMONIA_PI:-0}" = "1" ]; then
+  # Raspberry Pi deneme imaji (arm64): Adalet E-imza paketi yalniz amd64
+  echo "UYARI: Pi derlemesi, e-imza yok"
 else
   echo "HATA: adalet-eimza-tray kurulmamis"; exit 1
 fi
-# Ses: PipeWire kiosk'un kullanici oturumunda (paket on ayari zaten acar; acikca garanti edilir)
+# Ses: PipeWire kullanicinin oturumunda (paket on ayari zaten acar; acikca garanti edilir)
 systemctl --global enable pipewire.socket pipewire-pulse.socket wireplumber.service
 # USBGuard: kurallar ve ayar yalniz root'a (paket postinst'in urettigi kural dosyasi imajdakiyle degisir)
 if [ -d /etc/usbguard ]; then
   chown -R root:root /etc/usbguard; chmod 0700 /etc/usbguard
   chmod 0600 /etc/usbguard/usbguard-daemon.conf /etc/usbguard/rules.conf
   install -d -m 0700 /etc/usbguard/IPCAccessControl.d /var/log/usbguard
-  grep -q '^reject$' /etc/usbguard/rules.conf && grep -q '^# Armonia USBGuard servis ayari' /etc/usbguard/usbguard-daemon.conf \
+  grep -q '^# Armonia kurallari sonu$' /etc/usbguard/rules.conf && grep -q '^# Armonia USBGuard servis ayari' /etc/usbguard/usbguard-daemon.conf \
     || { echo "HATA: usbguard ayarlari Armonia surumu degil (paket uzerine yazmis olabilir)"; exit 1; }
 fi
+# Oturum kum havuzunda degil (denetci 19.11 Y1): komut calistirma kapilari kapatilir.
+# Thunar "Ozel Eylemler" (uca) eklentisi her komutu calistirabilir -> kaldirilir.
+rm -f /usr/lib/*/thunarx-3/thunar-uca.so
+# LibreOffice makrolari kapali ve kilitli: /usr/lib/libreoffice/share/registry/armonia.xcd (includes.chroot)
+[ -f /usr/lib/libreoffice/share/registry/armonia.xcd ] || { echo "HATA: LibreOffice makro kilidi yok"; exit 1; }
+# greetd: paket kendi config.toml'unu (vt7, /bin/sh) yazmis olabilir; Armonia surumu olmali
+grep -q '^# Armonia giris yoneticisi' /etc/greetd/config.toml \
+  || { echo "HATA: /etc/greetd/config.toml Armonia surumu degil"; exit 1; }
 # live-config gerekmiyor; fail-safe girdisiyle varsayilan "user"/sudo olusturabiliyordu (guvenlik-denetci Y1)
 apt-get purge -y live-config live-config-systemd || true
-# Acilisi yavaslatan / kiosk icin gereksiz birimler
+# Acilisi yavaslatan / gereksiz birimler. getty@tty1: greetd vt1'de. (Kurulu sistemde guvenlik guncellemesi
+# icin apt zamanlayicilari A6'da yeniden acilir.)
 systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer \
   e2scrub_reap.service fstrim.timer dpkg-db-backup.timer systemd-networkd-wait-online.service \
   getty@tty1.service live-config.service networking.service
 # Faz 2 kasa: wall ajani ExecStartPre'de Plymouth parola ajanini durduruyor; crypttab 'nofail' oldugundan
 # acilis kasayi beklemeden ilerleyince yanlis paroladan sonra parola bir daha sorulmuyordu (Hyper-V 3. deneme).
 systemctl mask systemd-ask-password-wall.path systemd-ask-password-wall.service
-# Faz 3 AppArmor: uyap_app profili derlemede sozdizimi denetiminden gecmeli (hata -> derleme durur)
-if [ -f /etc/apparmor.d/opt.armonia.cokluuyap.uyap_app ]; then
-  apparmor_parser -Q -K /etc/apparmor.d/opt.armonia.cokluuyap.uyap_app
-  ls /etc/apparmor.d/abstractions/ | grep -E '^(wayland|dri-common|dri-enumerate|mesa)$' | tr '\n' ' '; echo "<- mevcut soyutlamalar"
-  # Imajda olmayan programlarin ~100 profili (firefox, chrome, lxc, sbuild...) acilista bosuna derlenmesin:
-  # yalniz dosyalar silinir (abstractions/, tunables/, abi/ dizinleri kalir)
-  find /etc/apparmor.d -maxdepth 1 -type f ! -name opt.armonia.cokluuyap.uyap_app -delete
-fi
-# Faz 2 PostgreSQL: Debian'in imaja kurdugu varsayilan kume (RAM'de, kalici degil) kaldirilir; Debian servisleri
-# maskelenir. Sunucu kasada armonia-postgresql.service ile calisir (kiosk Wants= ile ceker).
-if command -v pg_lsclusters >/dev/null; then
-  pg_lsclusters -h | while read -r surum ad _; do pg_dropcluster --stop "$surum" "$ad" || true; done
-  # guvenlik-denetci O2: silme dogrulanir, artik dizinler temizlenir
-  [ -z "$(pg_lsclusters -h)" ] || { echo "HATA: Debian PostgreSQL kumesi silinemedi"; exit 1; }
-  rm -rf /etc/postgresql/*/ /var/lib/postgresql/*/
-  systemctl mask postgresql.service 'postgresql@.service'
-  # O3: ssl-cert'in derlemede bir kez urettigi (her cihazda AYNI) snakeoil anahtari kaldirilir
-  rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
-  gpasswd -d postgres ssl-cert 2>/dev/null || true
-  # D1: soket postgres grubunda 0770; kiosk bu grubun uyesi. (unix_socket_group=kiosk chown gerektiriyordu ve
-  # seccomp ~@privileged chown'u engelledi - Hyper-V 04:23.) PG veri dizini 0700 -> grup uyeligi veriye erisim vermez.
-  usermod -aG postgres kiosk
-fi
+# AppArmor: uyap_app profili Coklu UYAP katmaniyla gelecek. Imajda olmayan programlarin ~100 profili (firefox,
+# chrome, lxc, sbuild...) acilista bosuna derlenmesin: yalniz dosyalar silinir (abstractions/, tunables/, abi/ kalir)
+find /etc/apparmor.d -maxdepth 1 -type f ! -name 'opt.armonia.*' -delete
+# PostgreSQL: Coklu UYAP katmaniyla gelecek (kasa/). Bu imajda paket yok.
 # Faz 2: Armonia Plymouth temasi (kasa parolasi ekrani); initramfs yeniden uretilir
 if [ -f /usr/share/plymouth/themes/armonia/armonia.plymouth ] && command -v plymouth-set-default-theme >/dev/null; then
   plymouth-set-default-theme -R armonia

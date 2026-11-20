@@ -1,11 +1,20 @@
-# armonia-tarayici@.service ExecStartPre (root) ile yuklenir. Tarayici (Chromium) e-imza istemcisine (5975,
-# kimlik dogrulamasiz; kart kilitleme/sertifika okuma) ve LAN TLS'e (8843) baglanamaz. guvenlik-denetci E-Y1.
-# Claude, 2026-11-14.
+# armonia-tarayici@.service ExecStartPre (root) ile yuklenir. Claude, 2026-11-14; 2026-11-19 masaustu duzeni.
+# Tarayici (Chromium) dilimi icin giden trafik:
+#   - yerelde YALNIZ DNS (resolved, 127.0.0.53) ve Adalet E-imza (5975; UYAP Avukat Portali tarayicidan imzalar)
+#   - yerel ag (LAN, link-local, CGNAT) KAPALI: modem/yazici arayuzleri, diger bilgisayarlar
+#   - internete yalniz 80/443 (TCP) ve 443 (UDP, QUIC). Hangi SITELERE gidilecegine Chromium politikasi
+#     (URLAllowlist) karar verir; ag katmani yalniz kapiyi ve yerel/LAN hedefleri suzer, siteyi DEGIL.
+#   - BILINEN: udp 443 disi kapali -> E-Durusma (WebRTC STUN/TURN 3478, medya) muhtemelen calismaz; gercek
+#     denemede gereken kapilar olculup acilacak (DOGRULANMADI).
+# Cgroup yolu: armonia-tarayici.slice, armonia.slice'in COCUGU -> seviye 2 (Hyper-V 14 Kasim 11:40 dersi).
 flush chain inet filter tarayici_yerel
-# systemd'de "-" hiyerarsi demek: armonia-tarayici.slice, armonia.slice'in COCUGU -> cgroup yolu
-# armonia.slice/armonia-tarayici.slice (seviye 2). "level 1 armonia-tarayici.slice" Hyper-V'de (14 Kasim 11:40)
-# "cgroupv2 path fails" verdi ve tarayici birimi hic baslamadi.
-add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" tcp dport { 5975, 8843 } reject with tcp reset
-# guvenlik-denetci O1 (2026-11-14): resolv.conf artik resolved'a (127.0.0.53) bagli; tarayicinin DNS'e ihtiyaci
-# yok (yalniz 127.0.0.1:8800) -> DNS tuneliyle veri sizdirma kanali kapatilir
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
 add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" meta l4proto { tcp, udp } th dport 53 reject
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip daddr 127.0.0.1 tcp dport 5975 accept
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip6 daddr ::1 tcp dport 5975 accept
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip daddr 127.0.0.0/8 reject
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip6 daddr ::1 reject
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10 } reject
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip6 daddr { fc00::/7, fe80::/10 } reject
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" tcp dport != { 80, 443 } reject with tcp reset
+add rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" udp dport != 443 reject

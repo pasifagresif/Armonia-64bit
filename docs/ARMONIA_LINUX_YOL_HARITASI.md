@@ -7,6 +7,13 @@
 
 ## ▶ DEVAM NOKTASI (2026-11-14 öğlen) — yeni oturumda Claude'a "yol haritasından devam et" deyin
 
+### D.YÖN DEĞİŞİKLİĞİ (2026-11-19) — ÖNCE BUNU OKUYUN
+Kullanıcı kararı: Armonia artık **Çoklu UYAP üyesi olsun olmasın her hukukçunun kurup kullanabileceği** bir sistem.
+Açılışta Rust kodu (uyap_app) çalışmaz; önce işletim sisteminin ana çatısı (masaüstü, tarayıcı, e-imza, ofis,
+kurulum), Çoklu UYAP en son Ayarlar'dan açılan katman olarak eklenir. Kiosk düzeni ve aşağıdaki D.0–D.4'ün
+uyap_app'e ait maddeleri bu yüzden RAFTA. Güncel plan ve ilerleme: `docs/claude-notlar/planlar/armonia-herkes-icin.md`.
+Kiosk dosyaları: `armonia-linux/cokluuyap-katmani/` (BENIOKU.md).
+
 **Claude için ilk iş:** bu bölümü oku → kullanıcıya gerçek donanım denemesinin sonucunu sor (§D.3 soru listesi)
 → §D.0'daki yarım işi bitir → §D.4 iş listesinde sıradaki maddeye geç. Ayrıntılı gece günlüğü: `docs/ARMONIA_GECE_DURUM.md`.
 

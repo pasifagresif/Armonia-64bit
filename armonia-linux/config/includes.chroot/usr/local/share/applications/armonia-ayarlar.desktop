@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Ayarlar
+Comment=Ağ, klavye, ekran kilidi, yazıcılar, USB
+Exec=/opt/armonia/uygulamalar/armonia-ayarlar
+Icon=preferences-system
+Categories=Settings;
+Terminal=false

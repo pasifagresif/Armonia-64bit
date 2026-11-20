@@ -1,0 +1,24 @@
+// Armonia alt dock (waybar). Tasarim: ortada yuzen, simgeli kutucuklar (kullanicinin ana ekran gorseli, 2026-11-19).
+// Sabit programlar + sagda acik pencereler. "Coklu UYAP", "UYAP Editor (.udf)", "Yazici ve Tarayici" kutucuklari
+// ilgili asamalarda eklenecek. Claude, 2026-11-19.
+{
+  "layer": "top",
+  "position": "bottom",
+  "height": 86,
+  "margin-bottom": 8,
+  "spacing": 2,
+  "modules-center": ["custom/uyap", "custom/edevlet", "custom/yazi", "custom/tablo", "custom/belgeler", "wlr/taskbar"],
+  "custom/uyap": { "format": "UYAP &amp;\ne-Duruşma", "justify": "center", "tooltip-format": "UYAP Avukat Portalı", "on-click": "xdg-open https://avukat.uyap.gov.tr/" },
+  "custom/edevlet": { "format": "e-Devlet\n ", "justify": "center", "tooltip-format": "turkiye.gov.tr", "on-click": "xdg-open https://www.turkiye.gov.tr/" },
+  "custom/yazi": { "format": "Yazı\n(Writer)", "justify": "center", "tooltip-format": "LibreOffice Writer", "on-click": "libreoffice --writer" },
+  "custom/tablo": { "format": "Tablo\n(Calc)", "justify": "center", "tooltip-format": "LibreOffice Calc", "on-click": "libreoffice --calc" },
+  "custom/belgeler": { "format": "Belgelerim\n ", "justify": "center", "tooltip-format": "Dosya yöneticisi", "on-click": "thunar" },
+  "wlr/taskbar": {
+    "format": "{icon}",
+    "icon-size": 30,
+    "icon-theme": "Adwaita",
+    "tooltip-format": "{title}",
+    "on-click": "activate",
+    "on-click-middle": "close"
+  }
+}

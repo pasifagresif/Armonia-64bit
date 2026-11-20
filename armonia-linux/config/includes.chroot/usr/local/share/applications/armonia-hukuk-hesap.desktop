@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Hukuk Hesaplayıcı
+Comment=Hesap makinesi, süre, faiz, vekalet ücreti
+Exec=/opt/armonia/uygulamalar/hukuk_hesap
+Icon=accessories-calculator
+Categories=Office;Utility;
+Terminal=false

@@ -1,0 +1,84 @@
+#!/bin/sh
+# Armonia Ayarlar'in root yardimcisi (plan A3). pkexec ile cagrilir; polkit eylemi tr.armonia.ayar yalniz etkin
+# yerel oturuma, parolasiz acik (kullanicinin parolasi/sudo yetkisi yok). Bu yuzden HER ALT KOMUT dar ve
+# dogrulanmis: serbest metin yalniz izinli karakterlerle, dosya yollari sabit. Claude, 2026-11-19.
+#   klavye q|f            /etc/armonia/ayarlar.conf + labwc environment + /etc/default/keyboard (konsol)
+#   kilit 5|10|15|30      ekran kilidi suresi (dk; kurulu sistemde)
+#   yazici-varsayilan AD  CUPS varsayilan yazici
+#   yazici-sil AD         CUPS kuyrugunu siler
+#   wifi-baglan -         stdin: 1. satir SSID, 2. satir parola (bos: acik ag), 3. satir guvenlik (psk|sae|acik).
+#                         Parola KOMUT SATIRINA YAZILMAZ (ps ile gorunurdu). NetworkManager keyfile yazilir, baglanilir.
+#   wifi-unut UUID        Kayitli Wi-Fi agini siler
+set -eu
+AYAR=/etc/armonia/ayarlar.conf
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+ayar_yaz() {  # anahtar deger (ikisi de onceden dogrulanmis)
+  t=$(mktemp /etc/armonia/.ayarlar.XXXXXX)
+  { grep -v "^$1=" "$AYAR" 2>/dev/null || true; echo "$1=$2"; } > "$t"
+  chmod 0644 "$t"; mv -f "$t" "$AYAR"
+}
+
+kuyruk_dogrula() {
+  case "$1" in ''|-*|*[!A-Za-z0-9_-]*) echo "gecersiz yazici adi" >&2; exit 2 ;; esac
+  lpstat -v "$1" >/dev/null 2>&1 || { echo "yazici yok: $1" >&2; exit 3; }
+}
+
+[ $# -eq 2 ] || { echo "kullanim: ayar-yardimci <komut> <deger>" >&2; exit 2; }
+case "$1" in
+  klavye)
+    case "$2" in q) V="" ;; f) V="f" ;; *) echo "q ya da f" >&2; exit 2 ;; esac
+    ayar_yaz KLAVYE "$2"
+    printf '# Armonia Ayarlar yazar (ayar-yardimci). Elle degistirmeyin.\nXKB_DEFAULT_LAYOUT=tr\nXKB_DEFAULT_VARIANT=%s\n' "$V" \
+      > /etc/armonia/labwc/environment.yeni
+    mv -f /etc/armonia/labwc/environment.yeni /etc/armonia/labwc/environment
+    sed -i "s/^XKBVARIANT=.*/XKBVARIANT=\"$V\"/" /etc/default/keyboard
+    command -v setupcon >/dev/null && setupcon -k --force >/dev/null 2>&1 || true ;;
+  kilit)
+    case "$2" in 5|10|15|30) ayar_yaz KILIT_DK "$2" ;; *) echo "5, 10, 15 ya da 30" >&2; exit 2 ;; esac ;;
+  yazici-varsayilan)
+    kuyruk_dogrula "$2"; lpadmin -d "$2" ;;
+  yazici-sil)
+    kuyruk_dogrula "$2"; lpadmin -x "$2" ;;
+  wifi-baglan)
+    [ "$2" = "-" ] || exit 2
+    IFS= read -r SSID || true; IFS= read -r PAROLA || true; IFS= read -r GUV || true
+    N=$(printf '%s' "$SSID" | wc -c)
+    [ "$N" -ge 1 ] && [ "$N" -le 32 ] || { echo "Ag adi 1-32 bayt olmali" >&2; exit 2; }
+    case "$GUV" in
+      acik) [ -z "$PAROLA" ] || exit 2 ;;
+      psk|sae)
+        P=$(printf '%s' "$PAROLA" | wc -c)
+        [ "$P" -ge 8 ] && [ "$P" -le 63 ] || { echo "Parola 8-63 karakter olmali" >&2; exit 2; }
+        printf '%s' "$PAROLA" | LC_ALL=C grep -q '[^ -~]' && { echo "Parolada desteklenmeyen karakter" >&2; exit 2; } ;;
+      *) echo "guvenlik: psk|sae|acik" >&2; exit 2 ;;
+    esac
+    UUID=$(cat /proc/sys/kernel/random/uuid)
+    # SSID bayt listesi olarak (keyfile kacis sorunu olmaz); gorunen ad yalniz guvenli karakterler
+    BAYTLAR=$(printf '%s' "$SSID" | od -An -tu1 -v | tr -s ' \n' ';' | sed 's/^;//')
+    AD=$(printf '%s' "$SSID" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32); [ -n "$AD" ] || AD="Wi-Fi"
+    D=/etc/NetworkManager/system-connections/armonia-$UUID.nmconnection
+    umask 077
+    {
+      printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\npermissions=user:armonia;\n\n' "$AD" "$UUID"
+      printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$BAYTLAR"
+      if [ "$GUV" != acik ]; then
+        # keyfile: ters bolu kacislanir; parola yalniz yazdirilabilir ASCII (yukarida denetlendi)
+        printf '[wifi-security]\nkey-mgmt=%s\npsk=%s\n\n' "$( [ "$GUV" = sae ] && echo sae || echo wpa-psk)" \
+          "$(printf '%s' "$PAROLA" | sed 's/\\/\\\\/g; s/ /\\s/g')"
+      fi
+      printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\naddr-gen-mode=stable-privacy\n'
+    } > "$D"
+    chmod 0600 "$D"
+    nmcli connection load "$D" || { rm -f "$D"; echo "Ag profili yuklenemedi" >&2; exit 4; }
+    if ! nmcli -w 30 connection up uuid "$UUID" >/dev/null 2>&1; then
+      nmcli connection delete uuid "$UUID" >/dev/null 2>&1 || rm -f "$D"
+      echo "Baglanilamadi (parola yanlis ya da ag menzil disinda)" >&2; exit 4
+    fi ;;
+  wifi-unut)
+    case "$2" in *[!0-9a-f-]*|'') echo "gecersiz UUID" >&2; exit 2 ;; esac
+    [ "$(nmcli -g connection.type connection show uuid "$2" 2>/dev/null)" = "802-11-wireless" ] \
+      || { echo "Wi-Fi baglantisi degil" >&2; exit 3; }
+    nmcli connection delete uuid "$2" >/dev/null ;;
+  *) echo "bilinmeyen komut: $1" >&2; exit 2 ;;
+esac

@@ -1,0 +1,6 @@
+# Armonia masaustu bilesenleri (labwc acilinca bir kez). Claude, 2026-11-19.
+swaybg -m fill -i /usr/share/armonia/duvar.png -c '#F3EEE6' >/dev/null 2>&1 &
+waybar -c /etc/armonia/waybar/ust.jsonc -s /etc/armonia/waybar/ust.css >/dev/null 2>&1 &
+waybar -c /etc/armonia/waybar/dock.jsonc -s /etc/armonia/waybar/dock.css >/dev/null 2>&1 &
+mako -c /etc/armonia/mako.ini >/dev/null 2>&1 &
+/opt/armonia/bin/bosta.sh >/dev/null 2>&1 &

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=UYAP Avukat Portalı
+Exec=/usr/local/bin/xdg-open https://avukat.uyap.gov.tr/
+Icon=web-browser
+Categories=Office;
+Terminal=false

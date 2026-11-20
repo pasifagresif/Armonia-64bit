@@ -1,0 +1,42 @@
+# USB "takinca sor" (plan A5): bekletilen aygit icin masaustunde soru. Claude, 2026-11-19.
+# Root calisir (USBGuard IPC yalniz root'a acik); soru penceresi setpriv ile armonia kullanicisina dusurulur.
+[Unit]
+Description=Armonia: takilan USB aygiti icin kullaniciya sor
+Requires=usbguard.service
+After=usbguard.service
+ConditionPathIsDirectory=/sys/bus/usb/devices
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/usbguard watch --wait --exec /opt/armonia/bin/usb_sor.sh
+Restart=always
+RestartSec=2
+RuntimeDirectory=armonia-usb-sor
+RuntimeDirectoryMode=0700
+# Yalniz kullaniciya dusmek icin gereken yetkiler
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=-/run/user
+# Soru yagmuruna karsi (denetim O2)
+TasksMax=32
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

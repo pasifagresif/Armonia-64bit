@@ -21,3 +21,4 @@
 - [UyapMasa yalnız örnek](uyapmasa-yalniz-ornek.md) — özellikler ikinci program olmadan ruyap'ta çalışmalı; büyük işte önce plan
 - [Büro veritabanı planı](buro-veritabani-plani.md) — ofiste gömülü PostgreSQL, İş Listesi büroya, buluta veri yok; aşama durumu
 - [Tepsi sade panel](tepsi-sade-panel.md) — programı şişirme; ayarlar web'e; tepsi: giriş → sade panel, PIN tepside
+- [Armonia herkes için](armonia-herkes-icin.md) — 19.11 YÖN DEĞİŞİKLİĞİ: kiosk yok, açılışta Rust yok; temel hukukçu masaüstü, Çoklu UYAP en son Ayarlar'dan

@@ -1,0 +1,6 @@
+# Konsol ve Plymouth (kasa parolasi) klavye duzeni. TR-F icin XKBVARIANT="f". Cihaz kurulumunda sabitlenir.
+XKBMODEL="pc105"
+XKBLAYOUT="tr"
+XKBVARIANT=""
+XKBOPTIONS=""
+BACKSPACE="guess"

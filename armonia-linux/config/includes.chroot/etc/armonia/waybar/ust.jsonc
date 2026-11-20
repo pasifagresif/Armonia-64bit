@@ -1,0 +1,50 @@
+// Armonia ust cubuk (waybar). Tasarim: kullanicinin ana ekran gorseli (2026-11-19). Claude, 2026-11-19.
+// Solda "A Armonia" (tiklayinca uygulama menusu), ortada saat-tarih, sagda hap gostergeler.
+// Coklu UYAP hapleri (Sunucu modu, UYAP tuneli) ve sag ust durum karti Coklu UYAP katmaniyla gelecek.
+{
+  "layer": "top",
+  "position": "top",
+  "height": 40,
+  "margin-top": 6,
+  "margin-left": 6,
+  "margin-right": 6,
+  "spacing": 6,
+  "modules-left": ["custom/logo", "custom/kip"],
+  "modules-center": ["clock"],
+  "modules-right": ["custom/klavye", "custom/eimza", "network", "wireplumber", "battery", "custom/guc"],
+  "custom/logo": { "format": "Armonia", "tooltip-format": "Uygulamalar (Windows tuşu)", "on-click": "/opt/armonia/bin/menu.sh" },
+  "custom/kip": { "exec": "/opt/armonia/bin/durum.sh kip", "return-type": "json", "interval": "once" },
+  "clock": {
+    "locale": "tr_TR.UTF-8",
+    "format": "{:%H:%M — %e %B %A}",
+    "tooltip-format": "<tt>{calendar}</tt>",
+    "calendar": { "mode": "month", "format": { "today": "<b><u>{}</u></b>" } }
+  },
+  // signal 8: Ayarlar klavye duzenini degistirince yeniler (pkill -RTMIN+8 waybar)
+  "custom/klavye": { "exec": "/opt/armonia/bin/durum.sh klavye", "return-type": "json", "interval": "once", "signal": 8,
+                     "on-click": "/opt/armonia/uygulamalar/armonia-ayarlar klavye" },
+  "custom/eimza": { "exec": "/opt/armonia/bin/eimza_durum.sh", "return-type": "json", "interval": 10 },
+  "network": {
+    "format-ethernet": " ",
+    "format-wifi": " ",
+    "format-linked": " ",
+    "format-disconnected": "Ağ yok",
+    "tooltip-format-ethernet": "Kablolu ağ — {ipaddr}",
+    "tooltip-format-wifi": "{essid} (%{signalStrength}) — {ipaddr}",
+    "tooltip-format-disconnected": "Ağ bağlantısı yok",
+    "on-click": "/opt/armonia/uygulamalar/armonia-ayarlar ag"
+  },
+  "wireplumber": {
+    "format": "%{volume}",
+    "format-muted": "kapalı",
+    "on-click": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+    "on-scroll-up": "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+",
+    "on-scroll-down": "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+  },
+  "battery": {
+    "format": "%{capacity}",
+    "states": { "uyari": 20, "kritik": 10 },
+    "tooltip-format": "{timeTo}"
+  },
+  "custom/guc": { "format": " ", "tooltip-format": "Kilitle · Yeniden başlat · Kapat", "on-click": "/opt/armonia/bin/guc.sh" }
+}

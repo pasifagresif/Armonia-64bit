@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=İnternet (adli siteler)
+Comment=UYAP, e-Devlet ve resmî siteler
+Exec=/usr/local/bin/xdg-open %u
+Icon=web-browser
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;
+Terminal=false
