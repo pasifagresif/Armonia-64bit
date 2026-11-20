@@ -62,8 +62,13 @@ if [ -x /usr/lib/adalet-eimza-tray/bin/adalet-eimza-tray ]; then
   # E-O4: paketin apt deposu / --user birimi imajda kalmamali
   if ls /etc/apt/sources.list.d/ /usr/lib/systemd/user/ | grep -qi eimza; then echo "HATA: e-imza deposu/birimi kaldi"; exit 1; fi
 elif [ "${ARMONIA_PI:-0}" = "1" ]; then
-  # Raspberry Pi deneme imaji (arm64): Adalet E-imza paketi yalniz amd64
-  echo "UYARI: Pi derlemesi, e-imza yok"
+  # Raspberry Pi deneme imaji (arm64): resmi paket yalniz amd64 -> pi_derle.sh jar'i /opt/armonia/eimza'ya koyar,
+  # birim Debian OpenJDK 21 ile calisir (armonia-eimza.service.d/50-pi.conf). 2026-11-20.
+  [ -f /opt/armonia/eimza/eimza-tray.jar ] && [ -x /usr/lib/jvm/java-21-openjdk-arm64/bin/java ] \
+    || { echo "HATA: Pi e-imza jar'i ya da OpenJDK 21 yok"; exit 1; }
+  useradd --system --no-create-home --home-dir /var/lib/armonia-eimza --shell /usr/sbin/nologin eimza
+  chmod 0644 /etc/polkit-1/rules.d/50-armonia-eimza.rules
+  systemctl enable armonia-eimza.service pcscd.socket
 else
   echo "HATA: adalet-eimza-tray kurulmamis"; exit 1
 fi

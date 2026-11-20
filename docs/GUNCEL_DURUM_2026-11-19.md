@@ -94,8 +94,26 @@ Planlar: `docs/claude-notlar/planlar/armonia-herkes-icin.md`, `docs/claude-notla
   oturum dışı (greetd/VT) göstermek.
 - [ ] Açık (denetim D8): açılışta takılı olan aygıtlar sorulmuyor (yalnız Insert olayı) → bekletilmiş kalıyor.
 - [ ] A6'da (denetim D10): kurulu sisteme `/etc/armonia/deneme` geçmemeli; derlemede denetle.
-- [ ] **Raspberry Pi deneme imajı** (`armonia-linux/pi_derle.sh`, taban RPi OS Lite trixie 2026-10-06; e-imza yok,
-  `/etc/armonia/deneme` → canlı gibi). İlk derleme 19.11'de başlatıldı.
+- [ ] **Raspberry Pi deneme imajı** (`armonia-linux/pi_derle.sh`, taban RPi OS Lite trixie 2026-10-06,
+  `/etc/armonia/deneme` → canlı gibi). **20.11 durumu:**
+  - Derlendi (~25 dk, Pi 5'te). 19.11'deki kapanmalar Pi'nin kutuya vidalanmamasından kaynaklanan temassızlıktı
+    (kullanıcı çözdü). E-imzalı imaj 20.11 18:12'de USB belleğe (Cruzer Edge) yazıldı ve doğrulandı.
+    **Gerçek açılış ve imza denemesi henüz yapılmadı** (kullanıcı sonra deneyecek).
+  - Pi USB'den açılınca imaj "live" değildir: diskten çalışır, kalıcıdır; ilk açılışta kök bölüm büyür.
+  - **USBGuard Pi imajında kapalı** (kullanıcı kararı 20.11): `PresentDevicePolicy=apply-policy` kök diski (USB
+    bellek, sınıf 08) bekletip sistemi düşürüyordu. "Takınca sor" ileride ayrıca denenecek. ISO'da açık.
+  - Bluetooth sertleştirmede kapalı → Bluetooth klavye çalışmaz; USB klavye kullanılır.
+  - **E-imza Pi'de çalışıyor (20.11, gerçek kartla imza başarılı, SD karttaki sistemde):** AKİS'in Linux arm64
+    PKCS#11 sürücüsü yok (yalnız x64; Mac ARM var), ama ESYA saf Java APDU yoluna geçip imzalıyor. Resmi .deb'in
+    jar'ı + arm64 OpenJDK 21 + resmi başlatıcının JVM seçenekleri (şart: `--add-exports=jdk.crypto.cryptoki/
+    sun.security.pkcs11.wrapper=ALL-UNNAMED`). İmajda: `pi/armonia-eimza.service.d/50-pi.conf` (ISO birimi aynen,
+    yalnız ExecStart arm64 Java; pcscd ile birlikte yeniden başlar), `pi/pcscd.service.d/50-armonia.conf`
+    (--auto-exit yok). Ayrıntı ve tuzaklar: hafıza `eimza-arm64-pi.md`.
+  - [ ] USB'den açılış + avukat.uyap.gov.tr'de imza denemesi (tarayıcı URL izin listesi `localhost:5975`
+    isteklerini engelliyor mu, görülecek; nft kuralı 19.11'den beri izinli).
+  - [ ] Açık: kart bazen `SCARD_W_UNRESPONSIVE_CARD`'a düşüyor, yalnız çıkar-tak düzeltiyor; kök neden bulunmadı.
+  - [ ] ISO'ya taşınacak: e-imza biriminin pcscd ile birlikte yeniden başlaması (pcscd yeniden başlarsa Java'nın
+    PC/SC bağlamı ölüyor, SCARD_E_NO_SERVICE).
 - [ ] A6: Calamares ile diske kurulum (LUKS2, otomatik güvenlik güncellemesi, UEFI).
   + kurulumda "Donanım sürücüleri" adımı: isenkram-lookup ile takılı donanım → kullanıcı işaretler → hedefe kurulur
   (depo bileşenine non-free-firmware eklenmeli; şu an imaj yalnız main).
@@ -127,8 +145,9 @@ Planlar: `docs/claude-notlar/planlar/armonia-herkes-icin.md`, `docs/claude-notla
 - **İşlemci farkı:** Pi ARM64, Armonia imajı ve e-imza paketi **amd64**. Pi'de kod ve yapılandırma düzenlenir.
   Şunlar Pi'de yapılamaz ya da pratik değildir:
   - ISO derleme (live-build) ve Hyper-V testi,
-  - amd64 `uyap_app` derleme,
-  - gerçek UYAP/e-imza girişi.
+  - amd64 `uyap_app` derleme.
+  Pi deneme imajı (`sudo bash armonia-linux/pi_derle.sh`) Pi'de derlenir. E-imza (avukat.uyap.gov.tr imzası) 20.11'den
+  beri Pi'de de çalışıyor (bkz. yukarıda Raspberry Pi deneme imajı).
   Bunlar Windows makinede (WSL Debian 13 + Hyper-V) yapılır.
 - `ruyap` Pi'de **ARM için** derlenip birim testleri çalıştırılabilir:
   `cargo test --lib` (Linux'ta Türkçe yol sorunu yok).

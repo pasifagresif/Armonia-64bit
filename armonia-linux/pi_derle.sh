@@ -5,7 +5,7 @@
 # Taban: Raspberry Pi OS Lite (trixie, arm64) resmi imaji -> uzerine ayni Armonia katmani (config/includes.chroot,
 # sertlestirme/, paket listesi, 0100-armonia kancasi, kendi uygulamalarimiz). live-build KULLANILMAZ: Pi'nin
 # acilisi (firmware bolumu, Pi cekirdegi) ISO'dan farkli. Cikti diske yazilip dogrudan acilan bir imajdir.
-# Farklar: e-imza yok (paket yalniz amd64); /etc/armonia/deneme isareti -> canli sistem gibi (parola, kilit yok).
+# Farklar: e-imza amd64 paketinin jar'i + arm64 OpenJDK 21 ile (AKIS PKCS#11 yerine APDU, 20.11); /etc/armonia/deneme isareti -> canli sistem gibi (parola, kilit yok).
 #
 # Kullanim (Pi'de, aarch64):  sudo bash armonia-linux/pi_derle.sh
 #   CIKTI=<dizin>   cikti ve onbellek (varsayilan: ~/armonia-pi, sudo cagiraninin evi)
@@ -35,6 +35,14 @@ if [ ! -f "$TABAN" ]; then
 fi
 curl -fsSL -o "$TABAN.sha256" "$URL.sha256"
 sha256sum -c "$TABAN.sha256" || { echo "HATA: taban imaj saglamasi tutmadi"; rm -f "$TABAN"; exit 2; }
+# Adalet E-imza (resmi paket yalniz amd64): yalniz icindeki jar kullanilir, arm64 OpenJDK 21 ile calisir (20.11).
+EIMZA_DEB=adalet-eimza-tray_1.0.17_amd64.deb
+EIMZA_MD5=a1a4b3c3099df599c2d5193f2259c1aa
+if [ ! -f "$EIMZA_DEB" ]; then
+  curl -fL --retry 3 -o "$EIMZA_DEB.indiriliyor" "https://cdn.uyap.gov.tr/framework/public/$EIMZA_DEB" \
+    && mv "$EIMZA_DEB.indiriliyor" "$EIMZA_DEB"
+fi
+echo "$EIMZA_MD5  $EIMZA_DEB" | md5sum -c - || { echo "HATA: e-imza paketi saglamasi tutmadi"; rm -f "$EIMZA_DEB"; exit 2; }
 
 # 2. Calisma kopyasi, kok bolumu buyut
 echo "Imaj aciliyor"
@@ -78,7 +86,7 @@ PAKETLER=$(grep -hv '^\s*#' "$KAYNAK"/config/package-lists/*.list.chroot | tr -s
 echo "Paketler kuruluyor (uzun surer)"
 chroot "$K" apt-get update -qq
 chroot "$K" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
-  -o Dpkg::Options::=--force-confold $PAKETLER
+  -o Dpkg::Options::=--force-confold $PAKETLER openjdk-21-jre
 # Pi OS'un ilk acilis sihirbazi (kullanici adi sorar) ve cloud-init: Armonia kendi kullanicisini acar
 chroot "$K" env DEBIAN_FRONTEND=noninteractive apt-get purge -y -q userconf-pi 2>/dev/null || true
 mkdir -p "$K/etc/cloud"; touch "$K/etc/cloud/cloud-init.disabled"
@@ -94,9 +102,22 @@ find "$K/opt/armonia" "$K/etc/armonia" "$K/etc/systemd/system" -type f \
   ! -path "$K/opt/armonia/uygulamalar/*" -exec sed -i 's/\r$//' {} +
 chmod 0755 "$K"/opt/armonia/bin/*.sh "$K/opt/armonia/bin/ayar-yardimci" "$K/usr/local/bin/xdg-open"
 touch "$K/etc/armonia/deneme"
+# E-imza: jar + Pi'ye ozgu birim ek ayarlari (kanca eimza kullanicisini acar ve birimi etkinlestirir)
+EJ=$(mktemp -d); dpkg-deb -x "$CIKTI/$EIMZA_DEB" "$EJ"
+install -d -m 0755 "$K/opt/armonia/eimza"
+install -m 0644 "$EJ"/usr/lib/adalet-eimza-tray/lib/app/eimza-tray-*.jar "$K/opt/armonia/eimza/eimza-tray.jar"
+rm -rf "$EJ"
+for d in armonia-eimza.service.d pcscd.service.d; do
+  install -d -m 0755 "$K/etc/systemd/system/$d"; install -m 0644 "$KAYNAK/pi/$d/"*.conf "$K/etc/systemd/system/$d/"
+done
 cp "$KAYNAK/config/hooks/normal/0100-armonia.hook.chroot" "$K/tmp/kanca"
 echo "Armonia kancasi calisiyor"
 chroot "$K" env ARMONIA_PI=1 /bin/sh /tmp/kanca
+# Kullanici karari 20.11: deneme imajinda USBGuard kapali. Pi USB bellekten acilinca kok disk (sinif 08) acilista
+# takili aygit olarak bekletiliyor (PresentDevicePolicy=apply-policy) -> sistem kendi diskini kaybeder.
+# "Takinca sor" ileride ayrica denenecek; ISO ve kurulu sistemde USBGuard acik kalir.
+chroot "$K" systemctl disable usbguard.service armonia-usb-sor.service
+chroot "$K" systemctl mask usbguard.service
 
 # 5. Pi'ye ozgu: cekirdek parametreleri (AppArmor Pi cekirdeginde varsayilan LSM degil) ve sessiz acilis
 CMD="$K/boot/firmware/cmdline.txt"
