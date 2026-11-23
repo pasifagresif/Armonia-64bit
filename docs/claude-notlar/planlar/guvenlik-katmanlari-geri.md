@@ -170,3 +170,18 @@ reddediliyordu → ct mark 0x8800) düzeltildi; O2 (çıkışta birim durmuyordu
 klasörü aynı UID'de, ayrı kullanıcı kararı), D4 (internet kapıları), D5 (LAN özellikleri kapalı).
 Sırada: imzalı güncelleme tasarımı (kullanıcı isteği 23.11: uygulamada uyarı, doğrulayıp indirme, sahte güncelleme
 yüklenemesin; açık/gizli anahtar).
+
+## 23.11 akşam: donanım yazılımı, RAM göstergesi, UEFI, temalar
+- ISO: `non-free-firmware`, seçili liste (`0040-armonia-donanim-yazilimi`), `--firmware-chroot false`.
+- Üst çubukta RAM göstergesi (waybar `memory`).
+- UEFI: `--bootloaders "syslinux,grub-efi" --uefi-secure-boot auto`; GRUB menüsü kilitli (superusers, parolasız,
+  tek `--unrestricted` girdi); syslinux'a `allowoptions 0`. Denetim: kritik yok; ORTA-2/3/4 ve DÜŞÜK-1/3 düzeltildi.
+  Sınır (ORTA-1): USB'ye yazabilen biri açılış dosyalarını değiştirebilir → Faz 6 (imzalı UKI / dm-verity).
+  DÜŞÜK-2 (yapılandırma bulunamazsa GRUB kilitsiz) fiziksel erişim; firmware parolasıyla birlikte değerlendirilecek.
+  OVMF'de Secure Boot açık/kapalı açılış denemesi yapılmadı.
+- Temalar: Ayarlar → Görünüm; 9 tema (`/etc/armonia/tema/paletler`, Çoklu UYAP ile aynı adlar). `tema-yardimci`
+  (polkit `tr.armonia.tema`, parolasız; kullanıcı kararı) renk dosyalarını şablondan üretir; Çoklu UYAP'ın
+  `tema.txt`'si de yazılır.
+  Tema denetimi (23.11): kritik yok. O1 (Ayarlar kum havuzundaki tema.txt'ye yazıyordu, bağ izlenerek havuz
+  dışındaki dosya ezilebilirdi) → Çoklu UYAP temayı başlarken kendisi yazar. D1 (ayarlar.conf kilidi, flock) ve D2
+  (beş dosya önce üretilir, sonra taşınır) düzeltildi. Açık: D3 koyu temada sabit uyarı rengi düşük karşıtlıkta.

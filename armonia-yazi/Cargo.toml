@@ -1,0 +1,9 @@
+# Armonia Yazi: belge editoru (plan: docs/claude-notlar/planlar/armonia-belge-editoru.md). Claude, 2026-11-23.
+[workspace]
+resolver = "2"
+members = ["belge_cekirdek"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

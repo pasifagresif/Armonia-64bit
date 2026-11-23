@@ -1,0 +1,16 @@
+# Armonia pencere temasi (labwc). tema-yardimci uretir (sablon: /etc/armonia/tema/); elle degistirmeyin.
+window.active.title.bg.color: #@VURGU_KOYU@
+window.inactive.title.bg.color: #@PASIF@
+window.active.label.text.color: #@VURGU_UZERI@
+window.inactive.label.text.color: #@YAZI@
+window.active.button.unpressed.image.color: #@VURGU_UZERI@
+window.inactive.button.unpressed.image.color: #@YAZI@
+window.active.border.color: #@VURGU_KOYU@
+window.inactive.border.color: #@PASIF@
+menu.items.bg.color: #@ZEMIN@
+menu.items.text.color: #@YAZI@
+menu.items.active.bg.color: #@VURGU@
+menu.items.active.text.color: #@VURGU_UZERI@
+osd.bg.color: #@ZEMIN@
+osd.border.color: #@VURGU_KOYU@
+osd.label.text.color: #@YAZI@

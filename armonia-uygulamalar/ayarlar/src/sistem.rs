@@ -315,9 +315,95 @@ pub fn wifi_baglan(ssid: &str, parola: &str, guvenlik: &str) -> Result<(), Strin
     }
 }
 
+// ── Tema (23.11) ─────────────────────────────────────────────────────────────────────────────────────
+pub const PALET_DOSYASI: &str = "/etc/armonia/tema/paletler";
+pub const TEMA_YARDIMCI: &str = "/opt/armonia/bin/tema-yardimci";
+
+/// Bir Armonia teması. Renk sırası paletler dosyasındaki gibi:
+/// ARKA, ZEMIN, YAZI, KENAR, HAP, VURGU, VURGU_KOYU, VURGU_ZEMIN, PASIF, VURGU_UZERI.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tema {
+    pub kimlik: String,
+    pub ad: String,
+    pub renk: [u32; 10],
+}
+
+/// Varsayılan (dosya okunamazsa): 19.11 masaüstünün Armonia tonları.
+pub fn armonia_temasi() -> Tema {
+    Tema {
+        kimlik: "armonia".into(),
+        ad: "Armonia".into(),
+        renk: [0xF3EEE6, 0xFCFAF6, 0x2F2F2F, 0xE2DACB, 0xECE6DB, 0x7C9A7E, 0x5F7A61, 0xE6EBE3, 0xD8CFC0, 0xFAF8F4],
+    }
+}
+
+/// "kimlik|Ad|ARKA|...|VURGU_UZERI" satırları; yorum ve bozuk satırlar atlanır.
+pub fn palet_coz(metin: &str) -> Vec<Tema> {
+    metin
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+        .filter_map(|l| {
+            let a: Vec<&str> = l.trim().split('|').collect();
+            if a.len() != 12 || a[0].is_empty() || !a[0].chars().all(|c| c.is_ascii_lowercase()) {
+                return None;
+            }
+            let mut renk = [0u32; 10];
+            for (i, h) in a[2..].iter().enumerate() {
+                if h.len() != 6 {
+                    return None;
+                }
+                renk[i] = u32::from_str_radix(h, 16).ok()?;
+            }
+            Some(Tema { kimlik: a[0].to_string(), ad: a[1].to_string(), renk })
+        })
+        .collect()
+}
+
+pub fn temalar() -> Vec<Tema> {
+    let l = std::fs::read_to_string(PALET_DOSYASI).map(|m| palet_coz(&m)).unwrap_or_default();
+    if l.is_empty() { vec![armonia_temasi()] } else { l }
+}
+
+/// Root tema yardımcısı (polkit tr.armonia.tema: parolasız, yalnız izin listesindeki tema adı).
+pub fn tema_uygula(kimlik: &str) -> Result<(), String> {
+    calistir("pkexec", &[TEMA_YARDIMCI, kimlik]).map(|_| ())
+}
+
+/// Yeni renk dosyalarını oturuma okutur: waybar (SIGUSR2 = yeniden yükle), labwc (çerçeve), mako (bildirim).
+/// fuzzel her açılışta okur.
+pub fn tema_yenile() {
+    let _ = calistir("pkill", &["-USR2", "-x", "waybar"]);
+    let _ = calistir("labwc", &["--reconfigure"]);
+    let _ = calistir("makoctl", &["reload"]);
+}
+
+// Çoklu UYAP temayı başlarken kendisi alır (cokluuyap_calistir.sh, ayarlar.conf TEMA=). Ayarlar kum havuzunun
+// veri klasörüne YAZMAZ: oradaki bir sembolik bağ havuz dışındaki dosyayı ezdirebilirdi (denetçi 23.11 O1).
+
 #[cfg(test)]
 mod testler {
     use super::*;
+
+    #[test]
+    fn palet() {
+        let m = "# yorum\nkimlik|Ad|ARKA\narmonia|Armonia|F3EEE6|FCFAF6|2F2F2F|E2DACB|ECE6DB|7C9A7E|5F7A61|E6EBE3|D8CFC0|FAF8F4\n\
+                 gunbatimi|Gün Batımı|FBF4EE|FFFBF7|4A3020|EDD9C7|F5E8DC|C2602F|A34E24|FBEBDF|EDD9C7|FFFFFF\n\
+                 Bozuk|X|1|2|3|4|5|6|7|8|9|0\nkisa|K|FFFFFF\nkotu|K|GGGGGG|FFFBF7|4A3020|EDD9C7|F5E8DC|C2602F|A34E24|FBEBDF|EDD9C7|FFFFFF\n";
+        let t = palet_coz(m);
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0], armonia_temasi());
+        assert_eq!(t[1].ad, "Gün Batımı");
+        assert_eq!(t[1].renk[5], 0xC2602F);
+    }
+
+    /// Depodaki paletler dosyası: 9 tema, ilki Armonia (varsayılanla aynı), Çoklu UYAP kimlikleriyle uyumlu.
+    #[test]
+    fn depodaki_paletler() {
+        let t = palet_coz(include_str!("../../../armonia-linux/config/includes.chroot/etc/armonia/tema/paletler"));
+        let k: Vec<&str> = t.iter().map(|x| x.kimlik.as_str()).collect();
+        assert_eq!(k, ["armonia", "gul", "okyanus", "lavanta", "gunbatimi", "gunes", "grafit", "uyap", "koyu"]);
+        assert_eq!(t[0], armonia_temasi());
+    }
 
     #[test]
     fn ayar() {

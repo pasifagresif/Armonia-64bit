@@ -1,0 +1,10 @@
+# Armonia bildirimleri (mako). tema-yardimci uretir (sablon: /etc/armonia/tema/); elle degistirmeyin.
+font=DejaVu Sans 11
+background-color=#@ZEMIN@
+text-color=#@YAZI@
+border-color=#@VURGU_KOYU@
+border-size=2
+border-radius=10
+padding=12
+anchor=top-right
+default-timeout=8000

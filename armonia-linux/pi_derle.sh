@@ -121,7 +121,7 @@ fi
 # Windows'tan gelmis olabilecek CR satir sonlari
 find "$K/opt/armonia" "$K/etc/armonia" "$K/etc/systemd/system" -type f \
   ! -path "$K/opt/armonia/uygulamalar/*" ! -path "$K/opt/armonia/cokluuyap/*" -exec sed -i 's/\r$//' {} +
-chmod 0755 "$K"/opt/armonia/bin/*.sh "$K/opt/armonia/bin/ayar-yardimci" "$K/usr/local/bin/xdg-open"
+chmod 0755 "$K"/opt/armonia/bin/*.sh "$K/opt/armonia/bin/ayar-yardimci" "$K/opt/armonia/bin/tema-yardimci" "$K/usr/local/bin/xdg-open"
 # 23.11 (G1): deneme isareti KALDIRILDI. Pi imaji kalici (diske yazar); kilit ve parola canli sistem gibi kapali
 # kalamaz. Ilk acilista LUKS2 + tek parola (disk + 'armonia' kullanicisi) belirlenir.
 rm -f "$K/etc/armonia/deneme"

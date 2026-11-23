@@ -1,0 +1,52 @@
+#!/bin/sh
+# Armonia temasi (kullanici istegi 23.11). Root ile calisir: Ayarlar 'pkexec tema-yardimci <kimlik>' (polkit
+# tr.armonia.tema: yerel etkin oturumda PAROLASIZ; kullanici karari 23.11, yalniz gorunum degisir). Derlemede
+# 0100 kancasi varsayilani ('armonia') uretir.
+# Yalniz /etc/armonia/tema/paletler'deki kimlikler kabul edilir; renkler oradan gelir ve 6 haneli onaltilik olmak
+# zorundadir (sablona baska metin giremez). Uretilen dosyalar: ust cubuk + dock (waybar), pencere cercevesi ve
+# menu (labwc), uygulama menusu (fuzzel), bildirimler (mako). Yeniden yukleme Ayarlar'da (kullanici oturumu).
+# Claude, 2026-11-23.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+T=/etc/armonia/tema
+AYAR=/etc/armonia/ayarlar.conf
+K=${1:-}
+case "$K" in ''|*[!a-z]*) echo "gecersiz tema adi" >&2; exit 2 ;; esac
+SATIR=$(grep -v '^#' "$T/paletler" | awk -F'|' -v k="$K" '$1 == k { print; exit }')
+[ -n "$SATIR" ] || { echo "bilinmeyen tema: $K" >&2; exit 2; }
+# Alanlar: kimlik|Ad|ARKA|ZEMIN|YAZI|KENAR|HAP|VURGU|VURGU_KOYU|VURGU_ZEMIN|PASIF|VURGU_UZERI
+IFS='|' read -r _ _ ARKA ZEMIN YAZI KENAR HAP VURGU VURGU_KOYU VURGU_ZEMIN PASIF VURGU_UZERI <<EOT
+$SATIR
+EOT
+for r in "$ARKA" "$ZEMIN" "$YAZI" "$KENAR" "$HAP" "$VURGU" "$VURGU_KOYU" "$VURGU_ZEMIN" "$PASIF" "$VURGU_UZERI"; do
+  printf '%s' "$r" | grep -qE '^[0-9A-Fa-f]{6}$' || { echo "bozuk palet: $K" >&2; exit 3; }
+done
+# Ayni anda tek tema degisikligi; ayarlar.conf'a ayar-yardimci ile ayni kilitle yazilir (denetci 23.11 D1)
+exec 9>/run/armonia-ayar.lock; flock 9
+# Once BES dosyanin hepsi gecici olarak uretilir; biri bile basarisizsa hicbiri degismez ve gecici dosyalar
+# silinir (yarim tema kalmaz; denetci 23.11 D2). Sonra hepsi yerine tasinir.
+GECICI=""
+trap 'rm -f $GECICI' EXIT
+uret() {  # sablon hedef
+  y=$(mktemp "$(dirname "$2")/.tema.XXXXXX")
+  GECICI="$GECICI $y"
+  sed -e "s/@ZEMIN@/$ZEMIN/g" -e "s/@YAZI@/$YAZI/g" -e "s/@KENAR@/$KENAR/g" -e "s/@HAP@/$HAP/g" \
+      -e "s/@VURGU_KOYU@/$VURGU_KOYU/g" -e "s/@VURGU_ZEMIN@/$VURGU_ZEMIN/g" -e "s/@VURGU_UZERI@/$VURGU_UZERI/g" \
+      -e "s/@VURGU@/$VURGU/g" -e "s/@PASIF@/$PASIF/g" -e "s/@ARKA@/$ARKA/g" "$T/$1" > "$y"
+  if grep -q '@[A-Z_]*@' "$y"; then echo "sablonda cozulmemis alan: $1" >&2; exit 3; fi
+  chmod 0644 "$y"
+  TASI="$TASI $y:$2"
+}
+TASI=""
+uret ust.css.sablon /etc/armonia/waybar/ust.css
+uret dock.css.sablon /etc/armonia/waybar/dock.css
+uret themerc-override.sablon /etc/armonia/labwc/themerc-override
+uret fuzzel.ini.sablon /etc/armonia/fuzzel.ini
+uret mako.ini.sablon /etc/armonia/mako.ini
+for c in $TASI; do mv -f "${c%%:*}" "${c#*:}"; done
+# Secim ayar dosyasina (ayar-yardimci ile ayni bicim)
+t=$(mktemp /etc/armonia/.ayarlar.XXXXXX)
+GECICI="$GECICI $t"
+{ grep -v '^TEMA=' "$AYAR" 2>/dev/null || true; echo "TEMA=$K"; } > "$t"
+chmod 0644 "$t"; mv -f "$t" "$AYAR"
+echo "tema: $K"

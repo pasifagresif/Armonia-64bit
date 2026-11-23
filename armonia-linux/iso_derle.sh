@@ -58,12 +58,36 @@ fi
 # non-free-firmware (23.11): Wi-Fi / ekran karti yazilimlari + mikrokod; imajdaki apt kaynaklarina da girer
 # (surucu.sh sonradan takilan aygit icin firmware-* kurabilsin). --firmware-chroot false: live-build butun
 # firmware paketlerini KOYMASIN, yalniz 0040-armonia-donanim-yazilimi kancasindaki liste girsin.
+ACILIS="boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')"
+# UEFI (23.11): BIOS'ta syslinux, UEFI'de GRUB. --uefi-secure-boot auto: Debian'in imzali shim + GRUB'u varsa
+# Secure Boot acik makinede de acilir (imzali Debian cekirdegi). Derleme sonunda denetlenir.
 lb config --distribution trixie --archive-areas "main non-free-firmware" --debian-installer none \
   --firmware-chroot false --firmware-binary false \
-  --binary-images iso-hybrid --bootloaders syslinux --apt-recommends false --memtest none \
+  --binary-images iso-hybrid --bootloaders "syslinux,grub-efi" --uefi-secure-boot auto \
+  --apt-recommends false --memtest none \
   --iso-volume ARMONIA --chroot-squashfs-compression-type zstd \
-  --bootappend-live "boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')" >/dev/null
+  --bootappend-live "$ACILIS" >/dev/null
 cp -a "$KAYNAK/config/." config/
+# GRUB (UEFI) syslinux'taki gibi: menu yok, bekleme yok, cekirdek satiri ACILISTA KLAVYEYLE duzenlenemez.
+# live-build'in varsayilan GRUB menusu 'e' ile cekirdek satirini degistirmeye (init=/bin/sh -> parolasiz root) ve
+# 'c' ile GRUB komut satirina izin verir. superusers tanimli ama parolasi YOK -> kimse yetkilendirilemez; duzenleme
+# ve komut satiri kapali, yalniz --unrestricted girdi acilir. Sablonun diger dosyalari (install_*.cfg, tema)
+# live-build'den kopyalanir (binary_grub_cfg onlari bekler).
+# SINIR (denetci 23.11 ORTA-1): USB'ye YAZABILEN biri grub.cfg'yi, initrd'yi ve syslinux ayarini Secure Boot acikken
+# de degistirebilir (Secure Boot yalniz shim/GRUB/cekirdek ikililerini dogrular). Cozum Faz 6: kendi anahtarla
+# imzali UKI (cekirdek + initrd + cekirdek satiri tek imza) ya da imzali satirda dm-verity kok ozeti.
+G=config/bootloaders/grub-pc
+rm -rf "$G"; cp -a /usr/share/live/build/bootloaders/grub-pc "$G"
+cat > "$G/grub.cfg" <<EOT
+# Armonia (UEFI): menu ve duzenleme yok. iso_derle.sh uretti, $(date -u +%Y-%m-%d).
+set timeout=0
+set timeout_style=hidden
+set superusers="armonia-yonetim"
+menuentry "Armonia" --unrestricted {
+	linux /live/vmlinuz $ACILIS
+	initrd /live/initrd.img
+}
+EOT
 if [ "$WINDOWS" = "1" ]; then
   cp "$KAYNAK"/windows/hooks/*.hook.chroot config/hooks/normal/
   cp -a "$KAYNAK/windows/includes.chroot/." config/includes.chroot/
@@ -105,14 +129,16 @@ find config -type f \( -name '*.sh' -o -name '*.hook.*' -o -name '*.service' -o 
   -o -name '*.socket' -o -name '*.json' -o -name 'xdg-open' -o -name '*.xml' -o -name '*.rules' -o -name '*.nft' -o -name '*.slice' \
   -o -name '*.jsonc' -o -name '*.css' -o -name '*.ini' -o -name '*.toml' -o -name '*.desktop' -o -name 'autostart' \
   -o -name 'themerc-override' -o -name 'mimeapps.list' -o -name '*.xcd' -o -name '*.sha256' \
-  -o -name '*.policy' -o -name 'environment' -o -name 'ayar-yardimci' \) \
+  -o -name '*.policy' -o -name 'environment' -o -name 'ayar-yardimci' -o -name 'tema-yardimci' \
+  -o -name '*.sablon' -o -name 'paletler' \) \
   -exec sed -i 's/\r$//' {} +
 # /mnt/c'den gelen dosyalar 0777 olur: imaja herkese-yazilabilir dosya girmesin
 # (u=rwX 0777 dosyada x'i korur → systemd "marked executable" uyarisi; once hepsi 0644, sonra yalniz betikler 0755)
 find config/includes.chroot config/hooks config/bootloaders -type d -exec chmod 0755 {} +
 find config/includes.chroot config/hooks config/bootloaders -type f -exec chmod 0644 {} +
 chmod 0755 config/hooks/normal/*.hook.chroot config/includes.chroot/opt/armonia/bin/*.sh
-chmod 0755 config/includes.chroot/opt/armonia/bin/ayar-yardimci config/includes.chroot/opt/armonia/uygulamalar/*
+chmod 0755 config/includes.chroot/opt/armonia/bin/ayar-yardimci config/includes.chroot/opt/armonia/bin/tema-yardimci \
+  config/includes.chroot/opt/armonia/uygulamalar/*
 [ -f config/includes.chroot/usr/local/bin/xdg-open ] && chmod 0755 config/includes.chroot/usr/local/bin/xdg-open
 # Coklu UYAP ikilisi (yukaridaki genel 0644 x bitini siler; kanca -x sinamasi icin, denetci 23.11 K1)
 [ -f config/includes.chroot/opt/armonia/cokluuyap/uyap_app ] && chmod 0755 config/includes.chroot/opt/armonia/cokluuyap/uyap_app
@@ -121,13 +147,43 @@ set +e; lb build >"$IS/build.log" 2>&1; RC=$?; set -e
 echo "lb build cikis: $RC  sure: $(( $(date +%s) - BAS )) sn"
 grep -nE "^E:|^P: Begin|error|UYARI" "$IS/build.log" | grep -viE "liberror|error-perl|errors=" | tail -15
 [ $RC -eq 0 ] || exit $RC
-# Uretim ISO'sunda test bileseni olmamali (guvenlik-denetci O4)
-if [ "$TEST" != "1" ] && unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null \
-     | grep -qE 'kasa_test_kur|armonia-kasa-test|lynis_test|/usr/sbin/lynis|90-test-seri|kasa_test_dogrula|tus_kaydi|/usr/bin/evtest'; then
+# UEFI: EFI ikilisi, cekirdek/initrd yollari ve kilitli GRUB menusu ISO'da olmali (23.11)
+for f in binary/live/vmlinuz binary/live/initrd.img binary/boot/grub/grub.cfg; do
+  [ -e "$f" ] || { echo "HATA: UEFI acilisi icin $f yok"; exit 9; }
+done
+# Kilit: superusers var, hicbir password satiri yok, tek girdi ve o --unrestricted (denetci 23.11 DUSUK-1)
+GC=binary/boot/grub/grub.cfg
+grep -q '^set superusers=' "$GC" && grep -q -- '--unrestricted' "$GC" && ! grep -qE '^[[:space:]]*password' "$GC" \
+  && [ "$(grep -cE '^[[:space:]]*menuentry' "$GC")" = "1" ] || { echo "HATA: GRUB menusu kilitli degil"; exit 9; }
+# Ara yapilandirmalar yalniz bizim grub.cfg'ye zincirlenmeli (kilidi atlatan ikinci menu olmasin)
+for f in binary/boot/grub/loopback.cfg binary/boot/grub/x86_64-efi/grub.cfg; do
+  [ -f "$f" ] || continue
+  grep -qE '^[[:space:]]*menuentry' "$f" && { echo "HATA: $f kendi menusunu tasiyor"; exit 9; }
+done
+[ -n "$(find binary -ipath 'binary/efi/boot/bootx64.efi')" ] || { echo "HATA: UEFI acilisi icin EFI/boot/bootx64.efi yok"; exit 9; }
+# USB'den UEFI acilisinda firmware cogu zaman ISO9660'taki EFI/ dizinini degil, gomulu FAT imajini (efi.img,
+# El Torito EFI girdisi) kullanir (denetci 23.11 ORTA-3)
+[ -f binary/boot/grub/efi.img ] || { echo "HATA: UEFI icin binary/boot/grub/efi.img yok"; exit 9; }
+if command -v mdir >/dev/null; then
+  EFI_IC="$(mdir -i binary/boot/grub/efi.img ::EFI/boot 2>/dev/null || true)"
+  grep -qi 'bootx64' <<<"$EFI_IC" || { echo "HATA: efi.img icinde EFI/boot/bootx64.efi yok"; exit 9; }
+else
+  echo "UYARI: mtools yok; efi.img icerigi denetlenmedi (apt install mtools)"
+fi
+# Secure Boot: live-build imzali shim + GRUB'u kurabildiyse bunu gunluge yazar. Yalniz grubx64.efi'nin varligi
+# yetmez: imzasiz gcdx64 de ayni adla gelebilir (denetci 23.11 ORTA-2).
+if grep -q 'UEFI Secure Boot support enabled' "$IS/build.log"; then
+  echo "UEFI: imzali shim + GRUB (Secure Boot acik makinede de acilmali)"
+else
+  echo "UYARI: imzali Secure Boot destegi yok; Secure Boot acik makinede acilmaz (BIOS'ta Secure Boot kapatilmali)"
+fi
+LISTE="$(unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null || true)"
+# Uretim ISO'sunda test bileseni olmamali (guvenlik-denetci O4). LISTE uzerinden: unsquashfs | grep -q boru
+# hatti pipefail altinda SIGPIPE ile yanlis negatif veriyordu (denetci 23.11 ORTA-4)
+if [ "$TEST" != "1" ] && grep -qE 'kasa_test_kur|armonia-kasa-test|lynis_test|/usr/sbin/lynis|90-test-seri|kasa_test_dogrula|tus_kaydi|/usr/bin/evtest' <<<"$LISTE"; then
   echo "HATA: uretim ISO'sunda test bileseni bulundu"; exit 3
 fi
 # Windows katmani: WINDOWS=1'de kum havuzu + 32 bit Wine olmali; WINDOWS=0'da Wine hic olmamali
-LISTE="$(unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null || true)"
 if [ "$WINDOWS" = "1" ]; then
   for g in 'usr/bin/bwrap$' 'usr/bin/wine$' 'i386-windows' 'opt/armonia/bin/windows_calistir.sh$'; do
     grep -qE "$g" <<<"$LISTE" || { echo "HATA: Windows katmaninda $g yok"; exit 6; }

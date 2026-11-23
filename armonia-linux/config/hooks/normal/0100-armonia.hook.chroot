@@ -22,7 +22,12 @@ printf 'LANG=tr_TR.UTF-8\n' > /etc/locale.conf
 chown -R root:root /opt/armonia /etc/armonia
 chmod 0755 /opt/armonia/bin/*.sh
 chmod -R go-w /opt/armonia /etc/armonia /etc/systemd/system/armonia-*.service /etc/NetworkManager/conf.d
-chmod 0755 /opt/armonia/bin/ayar-yardimci
+chmod 0755 /opt/armonia/bin/ayar-yardimci /opt/armonia/bin/tema-yardimci
+# Tema (23.11): renk dosyalari (waybar, labwc, fuzzel, mako) sablondan uretilir; varsayilan Armonia
+/opt/armonia/bin/tema-yardimci armonia
+for f in waybar/ust.css waybar/dock.css labwc/themerc-override fuzzel.ini mako.ini; do
+  [ -s "/etc/armonia/$f" ] || { echo "HATA: tema dosyasi uretilmedi: $f"; exit 1; }
+done
 # Denetim: kok dosya sisteminde herkese-yazilabilir dosya kalmasin (sticky /tmp haric)
 if find / -xdev -type f -perm -0002 2>/dev/null | grep -q .; then
   echo "UYARI: herkese-yazilabilir dosyalar:"; find / -xdev -type f -perm -0002 2>/dev/null | head

@@ -14,14 +14,66 @@ enum IsSonucu {
     Baglanti(Result<(), String>, String),
 }
 
-const KREM: Color32 = Color32::from_rgb(243, 238, 230);
-const KART: Color32 = Color32::from_rgb(252, 250, 246);
-const YESIL: Color32 = Color32::from_rgb(95, 122, 97);
-const ACIK_YESIL: Color32 = Color32::from_rgb(124, 154, 126);
-const KENAR: Color32 = Color32::from_rgb(226, 218, 203);
-const YAZI: Color32 = Color32::from_rgb(47, 47, 47);
-const SOLUK: Color32 = Color32::from_rgb(110, 105, 95);
+/// Hata/uyarı rengi temadan bağımsız (anlam taşır).
 const UYARI: Color32 = Color32::from_rgb(160, 82, 45);
+
+/// Pencerenin renkleri: seçili Armonia temasından (/etc/armonia/tema/paletler, 23.11).
+#[derive(Clone, Copy)]
+struct Renkler {
+    arka: Color32,
+    kart: Color32,
+    baslik: Color32,
+    vurgu: Color32,
+    kenar: Color32,
+    yazi: Color32,
+    soluk: Color32,
+    hap: Color32,
+    vurgu_zemin: Color32,
+    vurgu_uzeri: Color32,
+    koyu: bool,
+}
+
+const fn hex(x: u32) -> Color32 {
+    Color32::from_rgb((x >> 16) as u8, (x >> 8) as u8, x as u8)
+}
+
+fn karistir(a: Color32, b: Color32, t: f32) -> Color32 {
+    let k = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgb(k(a.r(), b.r()), k(a.g(), b.g()), k(a.b(), b.b()))
+}
+
+impl Renkler {
+    fn yeni(t: &sistem::Tema) -> Self {
+        let [arka, zemin, yazi, kenar, hap, vurgu, vurgu_koyu, vurgu_zemin, _pasif, vurgu_uzeri] = t.renk.map(hex);
+        let koyu = t.kimlik == "koyu";
+        Renkler {
+            arka,
+            kart: zemin,
+            // Koyu zeminde koyu vurgu okunmaz: başlık/olumlu yazı vurgunun açılmış tonu
+            baslik: if koyu { karistir(vurgu, Color32::WHITE, 0.45) } else { vurgu_koyu },
+            vurgu,
+            kenar,
+            yazi,
+            soluk: karistir(yazi, arka, 0.42),
+            hap,
+            vurgu_zemin,
+            vurgu_uzeri,
+            koyu,
+        }
+    }
+}
+
+static RENK: std::sync::RwLock<Option<Renkler>> = std::sync::RwLock::new(None);
+
+fn r() -> Renkler {
+    RENK.read().ok().and_then(|g| *g).unwrap_or_else(|| Renkler::yeni(&sistem::armonia_temasi()))
+}
+
+fn renkleri_sec(t: &sistem::Tema) {
+    if let Ok(mut g) = RENK.write() {
+        *g = Some(Renkler::yeni(t));
+    }
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Bolum {
@@ -31,21 +83,25 @@ enum Bolum {
     Yazicilar,
     Usb,
     CokluUyap,
+    Gorunum,
     Hakkinda,
 }
 
-const BOLUMLER: [(Bolum, &str); 7] = [
+const BOLUMLER: [(Bolum, &str); 8] = [
     (Bolum::Ag, "Ağ"),
     (Bolum::Klavye, "Klavye"),
     (Bolum::Ekran, "Ekran ve kilit"),
     (Bolum::Yazicilar, "Yazıcılar"),
     (Bolum::Usb, "USB aygıtları"),
     (Bolum::CokluUyap, "Çoklu UYAP"),
+    (Bolum::Gorunum, "Görünüm"),
     (Bolum::Hakkinda, "Hakkında"),
 ];
 
 struct Uygulama {
     bolum: Bolum,
+    temalar: Vec<sistem::Tema>,
+    tema: String,
     canli: bool,
     klavye: String,
     kilit_dk: u32,
@@ -65,9 +121,15 @@ struct Uygulama {
 
 impl Uygulama {
     fn yeni(cc: &eframe::CreationContext<'_>) -> Self {
+        let temalar = sistem::temalar();
+        let secili = sistem::ayarlar().get("TEMA").cloned().unwrap_or_default();
+        let t = temalar.iter().find(|t| t.kimlik == secili).unwrap_or(&temalar[0]).clone();
+        renkleri_sec(&t);
         tema(&cc.egui_ctx);
         let mut u = Uygulama {
             bolum: Bolum::Klavye,
+            temalar,
+            tema: t.kimlik,
             canli: sistem::canli(),
             klavye: "q".into(),
             kilit_dk: 10,
@@ -91,6 +153,7 @@ impl Uygulama {
                 "ekran" => Bolum::Ekran,
                 "yazicilar" => Bolum::Yazicilar,
                 "usb" => Bolum::Usb,
+                "gorunum" => Bolum::Gorunum,
                 "hakkinda" => Bolum::Hakkinda,
                 _ => Bolum::Klavye,
             };
@@ -148,21 +211,22 @@ impl Uygulama {
 }
 
 fn tema(ctx: &egui::Context) {
-    let mut v = egui::Visuals::light();
-    v.panel_fill = KREM;
-    v.window_fill = KART;
-    v.extreme_bg_color = Color32::WHITE;
-    v.override_text_color = Some(YAZI);
-    v.selection.bg_fill = ACIK_YESIL;
-    v.selection.stroke.color = Color32::WHITE;
-    v.widgets.inactive.weak_bg_fill = Color32::from_rgb(236, 230, 219);
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(230, 235, 227);
-    v.widgets.active.weak_bg_fill = ACIK_YESIL;
-    v.widgets.noninteractive.bg_stroke.color = KENAR;
-    let r = egui::Rounding::same(8.0);
-    v.widgets.inactive.rounding = r;
-    v.widgets.hovered.rounding = r;
-    v.widgets.active.rounding = r;
+    let c = r();
+    let mut v = if c.koyu { egui::Visuals::dark() } else { egui::Visuals::light() };
+    v.panel_fill = c.arka;
+    v.window_fill = c.kart;
+    v.extreme_bg_color = if c.koyu { c.arka } else { Color32::WHITE };
+    v.override_text_color = Some(c.yazi);
+    v.selection.bg_fill = c.vurgu;
+    v.selection.stroke.color = c.vurgu_uzeri;
+    v.widgets.inactive.weak_bg_fill = c.hap;
+    v.widgets.hovered.weak_bg_fill = c.vurgu_zemin;
+    v.widgets.active.weak_bg_fill = c.vurgu;
+    v.widgets.noninteractive.bg_stroke.color = c.kenar;
+    let yuv = egui::Rounding::same(8.0);
+    v.widgets.inactive.rounding = yuv;
+    v.widgets.hovered.rounding = yuv;
+    v.widgets.active.rounding = yuv;
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
         use egui::{FontId, TextStyle};
@@ -178,8 +242,8 @@ fn kart(ui: &mut egui::Ui, icerik: impl FnOnce(&mut egui::Ui)) {
     // İç kenar boşluğu (2 × 16) ve çerçeve çizgisi dış genişliğe eklenir; taşmasın
     let w = (ui.available_width() - 34.0).max(100.0);
     egui::Frame::none()
-        .fill(KART)
-        .stroke(egui::Stroke::new(1.0_f32, KENAR))
+        .fill(r().kart)
+        .stroke(egui::Stroke::new(1.0_f32, r().kenar))
         .rounding(14.0)
         .inner_margin(16.0)
         .show(ui, |ui| {
@@ -190,7 +254,7 @@ fn kart(ui: &mut egui::Ui, icerik: impl FnOnce(&mut egui::Ui)) {
 }
 
 fn aciklama(ui: &mut egui::Ui, m: &str) {
-    ui.label(RichText::new(m).size(13.0).color(SOLUK));
+    ui.label(RichText::new(m).size(13.0).color(r().soluk));
 }
 
 impl eframe::App for Uygulama {
@@ -199,9 +263,9 @@ impl eframe::App for Uygulama {
         egui::SidePanel::left("bolumler")
             .resizable(false)
             .exact_width(200.0)
-            .frame(egui::Frame::none().fill(KART).inner_margin(14.0))
+            .frame(egui::Frame::none().fill(r().kart).inner_margin(14.0))
             .show(ctx, |ui| {
-                ui.label(RichText::new("Ayarlar").size(22.0).strong().color(YESIL));
+                ui.label(RichText::new("Ayarlar").size(22.0).strong().color(r().baslik));
                 ui.add_space(10.0);
                 for (b, ad) in BOLUMLER {
                     let r = ui.add_sized([170.0, 34.0], egui::SelectableLabel::new(self.bolum == b, RichText::new(ad).size(16.0)));
@@ -213,7 +277,7 @@ impl eframe::App for Uygulama {
                     }
                 }
             });
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(KREM).inner_margin(20.0)).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::none().fill(r().arka).inner_margin(20.0)).show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 // Kaydırma çubuğuna yer kalsın (yoksa kartların sağ kenarı kırpılıyor)
                 ui.set_max_width((ui.available_width() - 16.0).min(720.0));
@@ -224,10 +288,11 @@ impl eframe::App for Uygulama {
                     Bolum::Yazicilar => self.yazici_bolumu(ui),
                     Bolum::Usb => self.usb(ui),
                     Bolum::CokluUyap => self.coklu_uyap(ui),
+                    Bolum::Gorunum => self.gorunum(ui),
                     Bolum::Hakkinda => self.hakkinda(ui),
                 }
                 if let Some((iyi, m)) = &self.mesaj {
-                    ui.label(RichText::new(m).color(if *iyi { YESIL } else { UYARI }));
+                    ui.label(RichText::new(m).color(if *iyi { r().baslik } else { UYARI }));
                 }
             });
         });
@@ -248,8 +313,8 @@ impl Uygulama {
         kart(ui, |ui| {
             ui.label(RichText::new("Kablolu bağlantı").strong());
             match &durum.kablolu {
-                Some(_) => ui.label(RichText::new("Bağlı").color(YESIL)),
-                None => ui.label(RichText::new("Kablo takılı değil").color(SOLUK)),
+                Some(_) => ui.label(RichText::new("Bağlı").color(r().baslik)),
+                None => ui.label(RichText::new("Kablo takılı değil").color(r().soluk)),
             };
         });
         if durum.kablosuz_var {
@@ -267,8 +332,8 @@ impl Uygulama {
                     return;
                 }
                 match &durum.kablosuz {
-                    Some(ad) => ui.label(RichText::new(format!("Bağlı: {ad}")).color(YESIL)),
-                    None => ui.label(RichText::new("Bağlı değil").color(SOLUK)),
+                    Some(ad) => ui.label(RichText::new(format!("Bağlı: {ad}")).color(r().baslik)),
+                    None => ui.label(RichText::new("Bağlı değil").color(r().soluk)),
                 };
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!mesgul, egui::Button::new("Ağları tara")).clicked() {
@@ -289,13 +354,13 @@ impl Uygulama {
                             51..=75 => "▂▄▆",
                             _ => "▂▄▆█",
                         };
-                        ui.label(RichText::new(cubuk).color(YESIL).monospace());
+                        ui.label(RichText::new(cubuk).color(r().baslik).monospace());
                         ui.label(RichText::new(&a.ssid).strong());
                         if a.guvenlik == "acik" {
                             ui.label(RichText::new("şifresiz").size(12.0).color(UYARI));
                         }
                         if a.bagli {
-                            ui.label(RichText::new("bağlı").size(12.0).color(YESIL));
+                            ui.label(RichText::new("bağlı").size(12.0).color(r().baslik));
                         } else if self.secili_ag.as_deref() != Some(&a.ssid)
                             && ui.add_enabled(!mesgul, egui::Button::new("Bağlan").small()).clicked()
                         {
@@ -440,7 +505,7 @@ impl Uygulama {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(y.ad.replace('_', " ")).strong().size(16.0));
                     if y.varsayilan {
-                        ui.label(RichText::new("varsayılan").size(12.0).color(Color32::WHITE).background_color(ACIK_YESIL));
+                        ui.label(RichText::new("varsayılan").size(12.0).color(r().vurgu_uzeri).background_color(r().vurgu));
                     }
                 });
                 aciklama(ui, &format!("{} · {}", sistem::baglanti_turu(&y.adres), y.durum));
@@ -508,14 +573,71 @@ impl Uygulama {
 
     fn coklu_uyap(&mut self, ui: &mut egui::Ui) {
         ui.heading("Çoklu UYAP");
+        let kurulu = std::path::Path::new("/opt/armonia/cokluuyap/uyap_app").exists();
         kart(ui, |ui| {
-            ui.add_enabled(false, egui::Checkbox::new(&mut false, "Çoklu UYAP'ı aç"));
-            aciklama(
-                ui,
-                "Çoklu UYAP, birden çok avukatın UYAP işlerini tek ekranda izleyen ek programdır. Bu sistemde henüz \
-                 kurulu değil; kurulunca buradan açılıp kapatılacak.",
-            );
+            if kurulu {
+                ui.label(RichText::new("Kurulu").strong().color(r().baslik));
+                aciklama(
+                    ui,
+                    "Çoklu UYAP, birden çok avukatın UYAP işlerini tek ekranda izleyen ek programdır. Açılışta \
+                     kendiliğinden başlamaz; menüden ya da alttaki \"Çoklu UYAP\" kutucuğundan açılır. Kendi kum \
+                     havuzunda çalışır: yalnız kendi veri klasörünü ve Belgeler/UYAP klasörünü görür, yerel ağa kapalıdır.",
+                );
+                if ui.button("Çoklu UYAP'ı aç").clicked() {
+                    let _ = std::process::Command::new("/opt/armonia/bin/cokluuyap_ac.sh").spawn();
+                }
+            } else {
+                aciklama(
+                    ui,
+                    "Çoklu UYAP, birden çok avukatın UYAP işlerini tek ekranda izleyen ek programdır. Bu sistemde \
+                     kurulu değil.",
+                );
+            }
         });
+    }
+
+    fn gorunum(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Görünüm");
+        let mut secilen: Option<sistem::Tema> = None;
+        kart(ui, |ui| {
+            ui.label(RichText::new("Tema").strong());
+            aciklama(ui, "Üst çubuk, dock, pencere çerçeveleri, menü, bildirimler ve bu pencere seçilen temaya geçer. Çoklu UYAP da aynı temayla açılır.");
+            ui.add_space(4.0);
+            for t in &self.temalar {
+                let (alan, cevap) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(360.0), 34.0), egui::Sense::click());
+                let c = r();
+                if cevap.hovered() || t.kimlik == self.tema {
+                    ui.painter().rect_filled(alan, 8.0, if t.kimlik == self.tema { c.vurgu_zemin } else { c.hap });
+                }
+                // Örnek: tema zemini üstünde vurgu rengi (Çoklu UYAP'taki renkli nokta gibi)
+                let m = egui::pos2(alan.min.x + 20.0, alan.center().y);
+                ui.painter().circle_filled(m, 10.0, hex(t.renk[1]));
+                ui.painter().circle_stroke(m, 10.0, egui::Stroke::new(1.0_f32, hex(t.renk[3])));
+                ui.painter().circle_filled(m, 5.5, hex(t.renk[5]));
+                ui.painter().text(egui::pos2(alan.min.x + 40.0, alan.center().y), egui::Align2::LEFT_CENTER, &t.ad,
+                    egui::FontId::proportional(15.0), c.yazi);
+                if t.kimlik == self.tema {
+                    ui.painter().text(egui::pos2(alan.max.x - 12.0, alan.center().y), egui::Align2::RIGHT_CENTER, "✓",
+                        egui::FontId::proportional(15.0), c.baslik);
+                }
+                if cevap.clicked() && t.kimlik != self.tema {
+                    secilen = Some(t.clone());
+                }
+            }
+        });
+        if let Some(t) = secilen {
+            let sonuc = sistem::tema_uygula(&t.kimlik);
+            if sonuc.is_ok() {
+                sistem::tema_yenile();
+                renkleri_sec(&t);
+                tema(ui.ctx());
+                self.tema = t.kimlik.clone();
+            }
+            self.sonuc(sonuc, &format!("Tema: {}", t.ad));
+        }
+        if self.canli {
+            kart(ui, |ui| aciklama(ui, "Deneme (canlı) sisteminde seçim bilgisayar kapanınca Armonia'ya döner."));
+        }
     }
 
     fn hakkinda(&mut self, ui: &mut egui::Ui) {
@@ -524,7 +646,7 @@ impl Uygulama {
         kart(ui, |ui| {
             egui::Grid::new("bilgi").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 for (k, v) in [("Sistem", &b.sistem), ("İşlemci", &b.islemci), ("Bellek", &b.bellek), ("Disk", &b.disk), ("Çekirdek", &b.cekirdek)] {
-                    ui.label(RichText::new(k).color(SOLUK));
+                    ui.label(RichText::new(k).color(r().soluk));
                     ui.label(v.as_str());
                     ui.end_row();
                 }

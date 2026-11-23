@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Armonia temasi: tema-yardimci yalniz izin listesindeki tema adini kabul eder ve yalniz renk dosyalarini
+     yazar. Yerel etkin oturumda PAROLASIZ (kullanici karari 23.11): Pi'deki parola kurali (G3, tr.armonia.ayar)
+     buna uygulanmaz; kotu amacli bir surec en fazla renkleri degistirebilir. Claude, 2026-11-23. -->
+<policyconfig>
+  <vendor>Armonia</vendor>
+  <action id="tr.armonia.tema">
+    <description>Armonia temasini degistir</description>
+    <message>Temayi degistirmek icin yetki gerekiyor</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/opt/armonia/bin/tema-yardimci</annotate>
+  </action>
+</policyconfig>

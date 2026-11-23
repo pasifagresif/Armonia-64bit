@@ -1,4 +1,4 @@
-# Armonia "A" menusu (fuzzel). Claude, 2026-11-19. Yalniz fuzzel 1.8 (bookworm) ile de gecerli anahtarlar:
+# Armonia "A" menusu (fuzzel). tema-yardimci uretir (sablon: /etc/armonia/tema/fuzzel.ini.sablon); elle degistirmeyin.
 # 1.8 bilinmeyen anahtarda (anchor, colors.prompt) hic acilmiyor (Pi onizlemesi).
 [main]
 font=DejaVu Sans:size=12
@@ -15,13 +15,13 @@ line-height=28
 show-actions=no
 
 [colors]
-background=FAF8F4f2
-text=2F2F2Fff
-match=5F7A61ff
-selection=7C9A7Eff
-selection-text=FAF8F4ff
-selection-match=FAF8F4ff
-border=5F7A61ff
+background=@ZEMIN@f2
+text=@YAZI@ff
+match=@VURGU_KOYU@ff
+selection=@VURGU@ff
+selection-text=@VURGU_UZERI@ff
+selection-match=@VURGU_UZERI@ff
+border=@VURGU_KOYU@ff
 
 [border]
 width=2

@@ -14,6 +14,8 @@ AYAR=/etc/armonia/ayarlar.conf
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 ayar_yaz() {  # anahtar deger (ikisi de onceden dogrulanmis)
+  # tema-yardimci ile ayni kilit: es zamanli oku-degistir-yaz bir ayari kaybetmesin (denetci 23.11 D1)
+  exec 9>/run/armonia-ayar.lock; flock 9
   t=$(mktemp /etc/armonia/.ayarlar.XXXXXX)
   { grep -v "^$1=" "$AYAR" 2>/dev/null || true; echo "$1=$2"; } > "$t"
   chmod 0644 "$t"; mv -f "$t" "$AYAR"

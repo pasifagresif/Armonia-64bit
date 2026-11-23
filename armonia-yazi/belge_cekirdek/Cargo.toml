@@ -1,0 +1,11 @@
+[package]
+name = "belge_cekirdek"
+version = "0.1.0"
+edition = "2021"
+description = "Armonia Yazı belge çekirdeği: belge modeli, UDF (UYAP) okuma/yazma; ileride DOCX ve PDF"
+publish = false
+
+[dependencies]
+# ruyap ile aynı sürümler; ikisi de WebAssembly'de çalışır (deflate: saf Rust miniz_oxide)
+zip = { version = "2", default-features = false, features = ["deflate"] }
+roxmltree = "0.20"

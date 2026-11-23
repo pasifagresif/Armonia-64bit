@@ -11,7 +11,7 @@
   "spacing": 6,
   "modules-left": ["custom/logo", "custom/kip"],
   "modules-center": ["clock"],
-  "modules-right": ["custom/klavye", "custom/eimza", "network", "wireplumber", "battery", "custom/guc"],
+  "modules-right": ["memory", "custom/klavye", "custom/eimza", "network", "wireplumber", "battery", "custom/guc"],
   "custom/logo": { "format": "Armonia", "tooltip-format": "Uygulamalar (Windows tuşu)", "on-click": "/opt/armonia/bin/menu.sh" },
   "custom/kip": { "exec": "/opt/armonia/bin/durum.sh kip", "return-type": "json", "interval": "once" },
   "clock": {
@@ -24,6 +24,14 @@
   "custom/klavye": { "exec": "/opt/armonia/bin/durum.sh klavye", "return-type": "json", "interval": "once", "signal": 8,
                      "on-click": "/opt/armonia/uygulamalar/armonia-ayarlar klavye" },
   "custom/eimza": { "exec": "/opt/armonia/bin/eimza_durum.sh", "return-type": "json", "interval": 10 },
+  // RAM gostergesi (kullanici istegi 23.11): canli sistem (toram) imajin kendisini de RAM'de tutar.
+  // Kullanilan = toplam - kullanilabilir (MemAvailable). Kabuk acmaz, yalniz /proc/meminfo okur.
+  "memory": {
+    "interval": 5,
+    "format": "RAM {used:0.1f} / {total:0.1f} GB",
+    "tooltip-format": "Bellek %{percentage} dolu\nKullanılan {used:0.1f} GB · Boş {avail:0.1f} GB · Toplam {total:0.1f} GB",
+    "states": { "uyari": 80, "kritik": 92 }
+  },
   "network": {
     "format-ethernet": " ",
     "format-wifi": " ",
