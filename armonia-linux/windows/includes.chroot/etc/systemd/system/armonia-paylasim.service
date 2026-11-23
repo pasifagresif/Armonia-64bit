@@ -1,0 +1,22 @@
+# Armonia: agdaki Windows program klasoru (Icramatik). Yalniz root baglar. Claude, 2026-11-23.
+# Type=simple: ag gelene kadar arka planda dener, acilisi bekletmez. Ad alani kum havuzu (ProtectSystem,
+# PrivateTmp...) KONMAZ: baglama ana ad alaninda gorunmeli.
+[Unit]
+Description=Armonia: agdaki Windows program klasoru
+After=network.target NetworkManager.service
+ConditionPathExists=/etc/armonia/windows.conf
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+ExecStart=/opt/armonia/bin/paylasim_bagla.sh
+ExecStop=-/bin/umount -l /srv/paylasim/windows
+RuntimeDirectory=armonia-paylasim
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

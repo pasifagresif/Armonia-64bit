@@ -77,7 +77,7 @@ kiosk: açılışta doğrudan `uyap_app` başlıyor (`oturum.sh` sonsuz döngü)
 - Kurulu sistemde: `toram` yok; kasa (LUKS bölüm) yerine tam disk şifreleme; PostgreSQL yalnız Çoklu UYAP açıksa.
 - `unattended-upgrades` (yalnız Debian güvenlik deposu) kurulu sistemde açık; canlıda kapalı.
 - `live-config` purge kararı korunur; kurulu sistem kullanıcısının `sudo` yetkisi yok (yönetim: Ayarlar + polkit).
-- Canlı imajda `toram` kalkar (Ofis + tarayıcı ile imaj ~1,5–2 GB; 8 GB RAM'de RAM'e kopyalamak ağır).
+- Canlı imajda `toram` 19.11'de kaldırılmıştı (imaj ~1,5–2 GB); **23.11 kullanıcı kararıyla geri eklendi** (açılıştan sonra USB çıkarılabilir, medya değiştirilemez). Bedel: RAM'de imaj boyu kadar yer tutar; 4 GB RAM'li makinede sıkışabilir.
 - UEFI: `grub-efi` + BIOS birlikte (yol haritası D.4-3).
 
 ### A7 — Sertleştirme denetimi ve belgeler

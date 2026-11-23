@@ -44,6 +44,9 @@ grep -q '^  dns-sd = disable' /etc/ipp-usb/ipp-usb.conf || { echo "HATA: ipp-usb
 # trixie'de usbguard-dbus ayni pakette ve kendini etkinlestiriyor: D-Bus/Polkit uzerinden kural degistirme yuzeyi
 # (Gemini taslagi da kurulmamasini istiyordu). Yonetim yalniz root CLI ile (A5'te "takinca sor" yardimcisi).
 systemctl mask usbguard-dbus.service
+# Cekirdek komut satirina systemd.debug_shell eklenerek tty9'da parolasiz root kabugu acilmasin (denetci 23.11
+# G1-b; Pi'de cmdline.txt sifresiz FAT bolumde). init= ile atlatma imzali acilisa (Faz 6) kadar acik.
+systemctl mask debug-shell.service
 # guvenlik-denetci Y2: tarayici birimi kullanicinin systemd --user / D-Bus soketlerine erisemesin
 # (StartTransientUnit ile kum havuzu disinda komut). %U system biriminde 0'a cozulur -> UID burada yazilir.
 U=$(id -u armonia); install -d -m 0755 /etc/systemd/system/armonia-tarayici@.service.d
@@ -103,7 +106,10 @@ systemctl mask systemd-ask-password-wall.path systemd-ask-password-wall.service
 # AppArmor: uyap_app profili Coklu UYAP katmaniyla gelecek. Imajda olmayan programlarin ~100 profili (firefox,
 # chrome, lxc, sbuild...) acilista bosuna derlenmesin: yalniz dosyalar silinir (abstractions/, tunables/, abi/ kalir)
 find /etc/apparmor.d -maxdepth 1 -type f ! -name 'opt.armonia.*' -delete
-# PostgreSQL: Coklu UYAP katmaniyla gelecek (kasa/). Bu imajda paket yok.
+# PostgreSQL: Coklu UYAP katmaniyla gelecek (kasa/). Bu imajda paket yok. Sertlestirmesi:
+# cokluuyap-katmani/hooks/normal/0200-cokluuyap-postgresql.hook.chroot
+# Her cihazda AYNI olan snakeoil anahtari temel imajda da kalmasin (ssl-cert baska paketle gelirse; denetci O3)
+rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
 # Faz 2: Armonia Plymouth temasi (kasa parolasi ekrani); initramfs yeniden uretilir
 if [ -f /usr/share/plymouth/themes/armonia/armonia.plymouth ] && command -v plymouth-set-default-theme >/dev/null; then
   plymouth-set-default-theme -R armonia

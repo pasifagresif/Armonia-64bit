@@ -1,0 +1,19 @@
+# Armonia Pi: ilk acilis sifrelemesinin son adimi (initramfs + cmdline). Yalniz bayrak varken calisir.
+# Claude, 2026-11-23.
+[Unit]
+Description=Armonia disk sifrelemesi son adimi
+ConditionKernelCommandLine=armonia.ilk_sifreleme=1
+ConditionPathExists=/etc/armonia/sifreleme-yapildi
+After=local-fs.target
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/opt/armonia/bin/sifreleme_son.sh
+StandardOutput=journal
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

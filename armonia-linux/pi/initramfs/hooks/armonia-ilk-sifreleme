@@ -1,0 +1,18 @@
+#!/bin/sh
+# initramfs-tools kancasi: ilk acilis sifrelemesi (scripts/local-top/armonia-ilk-sifreleme) icin araclar ve
+# cekirdek modulleri. cryptsetup ve askpass'i cryptsetup-initramfs koyar (conf-hook CRYPTSETUP=y). Claude, 2026-11-23.
+PREREQ="cryptroot"
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+
+for p in sfdisk partx e2fsck resize2fs blkid udevadm; do
+  y=$(command -v "$p" 2>/dev/null || true)
+  [ -n "$y" ] && copy_exec "$y" /sbin
+done
+# Gerekli: cryptsetup + askpass cryptsetup-initramfs'ten gelmeli
+[ -x "$DESTDIR/sbin/cryptsetup" ] || [ -x "$DESTDIR/usr/sbin/cryptsetup" ] \
+  || { echo "HATA: initramfs'te cryptsetup yok (CRYPTSETUP=y?)" >&2; exit 1; }
+# dm-crypt + iki sifre yolu (AES-XTS: Pi 5; Adiantum: AES komutu olmayan Pi 4). Cekirdekte gomulu olanlar atlanir.
+manual_add_modules dm_mod dm_crypt xts aes_ce_blk aes_ce_cipher aes_neon_bs aes_neon_blk sha256_arm64 \
+  adiantum chacha_neon chacha_generic nhpoly1305 nhpoly1305_neon poly1305_neon libpoly1305 ext4

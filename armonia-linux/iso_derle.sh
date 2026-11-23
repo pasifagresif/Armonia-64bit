@@ -16,6 +16,10 @@ if [ -z "${ISO_DIZIN:-}" ]; then
 fi
 mkdir -p "$ISO_DIZIN"
 TEST="${TEST:-0}"
+# Windows katmani (windows/BENIOKU.md): Icramatik icin Debian Wine 32+64 bit, agsiz bubblewrap kum havuzunda.
+# Kullanici karari 23.11: Icramatik 32 bit -> WINDOWS=1'de ia32_emulation=0 KALDIRILIR (bilincli gevseme).
+# WINDOWS=0: Windows katmani yok, ia32_emulation=0 yerinde (tam sertlestirilmis ISO).
+WINDOWS="${WINDOWS:-1}"
 # TEST=1 katmani (kasa bicimlendirme/dogrulama) kasa katmanina dayanir; temel masaustu imajinda kasa yok
 [ "$TEST" = "1" ] && { echo "HATA: TEST=1 kasa katmani ister; temel imajda kullanilmaz (Coklu UYAP asamasinda geri gelecek)"; exit 1; }
 [ "$(id -u)" = "0" ] || { echo "HATA: root ile calistirin (live-build root ister)"; exit 1; }
@@ -44,11 +48,27 @@ mkdir -p "$IS"; cd "$IS"
 lb clean >/dev/null 2>&1 || true
 rm -rf config
 EK_PARAM="$(tr -d '\r\n' < "$KAYNAK/sertlestirme/cekirdek_parametreleri.txt")"
+if [ "$WINDOWS" = "1" ]; then
+  EK_PARAM="$(echo "${EK_PARAM/ia32_emulation=0/}" | tr -s ' ')"
+  echo "UYARI: WINDOWS=1 -> ia32_emulation=0 kaldirildi (32 bit Wine icin; kullanici karari 23.11)"
+fi
 lb config --distribution trixie --archive-areas main --debian-installer none \
   --binary-images iso-hybrid --bootloaders syslinux --apt-recommends false --memtest none \
   --iso-volume ARMONIA --chroot-squashfs-compression-type zstd \
-  --bootappend-live "boot=live quiet splash loglevel=3 $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')" >/dev/null
+  --bootappend-live "boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')" >/dev/null
 cp -a "$KAYNAK/config/." config/
+if [ "$WINDOWS" = "1" ]; then
+  cp "$KAYNAK"/windows/hooks/*.hook.chroot config/hooks/normal/
+  cp -a "$KAYNAK/windows/includes.chroot/." config/includes.chroot/
+  grep -q '^PAYLASIM="//' "$KAYNAK/windows/includes.chroot/etc/armonia/windows.conf" \
+    || echo "UYARI: windows.conf'ta PAYLASIM bos; Icramatik kisayolu 'Ayarlanmamis' diyecek"
+  # Dock'a Icramatik kutucugu (yalniz bu derlemenin kopyasinda)
+  D=config/includes.chroot/etc/armonia/waybar/dock.jsonc
+  sed -i -e 's|"custom/belgeler", "wlr/taskbar"|"custom/belgeler", "custom/icramatik", "wlr/taskbar"|' \
+    -e '/^  "custom\/belgeler":/a\  "custom/icramatik": { "format": "İcramatik\\n ", "justify": "center", "tooltip-format": "Ağdaki İcramatik (ağsız kum havuzu)", "on-click": "/opt/armonia/bin/windows_calistir.sh" },' "$D"
+  grep -q '"custom/icramatik", "wlr/taskbar"' "$D" && grep -q '^  "custom/icramatik":' "$D" \
+    || { echo "HATA: dock'a Icramatik eklenemedi"; exit 1; }
+fi
 # Faz 3 sertlestirme katmani (guvenlik-denetci denetiminden gecti, 2026-11-14)
 cp -a "$KAYNAK/sertlestirme/etc/." config/includes.chroot/etc/
 # Armonia'nin kendi uygulamalari (Ayarlar, Hukuk Hesaplayici): derlenip /opt/armonia/uygulamalar'a
@@ -74,7 +94,7 @@ find config -type f \( -name '*.sh' -o -name '*.hook.*' -o -name '*.service' -o 
   -o -name '*.in' -o -name '*.list.*' -o -name '*.script' -o -name '*.plymouth' -o -name 'crypttab' \
   -o -name '*.socket' -o -name '*.json' -o -name 'xdg-open' -o -name '*.xml' -o -name '*.rules' -o -name '*.nft' -o -name '*.slice' \
   -o -name '*.jsonc' -o -name '*.css' -o -name '*.ini' -o -name '*.toml' -o -name '*.desktop' -o -name 'autostart' \
-  -o -name 'themerc-override' -o -name 'mimeapps.list' -o -name '*.xcd' \
+  -o -name 'themerc-override' -o -name 'mimeapps.list' -o -name '*.xcd' -o -name '*.sha256' \
   -o -name '*.policy' -o -name 'environment' -o -name 'ayar-yardimci' \) \
   -exec sed -i 's/\r$//' {} +
 # /mnt/c'den gelen dosyalar 0777 olur: imaja herkese-yazilabilir dosya girmesin
@@ -93,6 +113,15 @@ grep -nE "^E:|^P: Begin|error|UYARI" "$IS/build.log" | grep -viE "liberror|error
 if [ "$TEST" != "1" ] && unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null \
      | grep -qE 'kasa_test_kur|armonia-kasa-test|lynis_test|/usr/sbin/lynis|90-test-seri|kasa_test_dogrula|tus_kaydi|/usr/bin/evtest'; then
   echo "HATA: uretim ISO'sunda test bileseni bulundu"; exit 3
+fi
+# Windows katmani: WINDOWS=1'de kum havuzu + 32 bit Wine olmali; WINDOWS=0'da Wine hic olmamali
+LISTE="$(unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null || true)"
+if [ "$WINDOWS" = "1" ]; then
+  for g in 'usr/bin/bwrap$' 'usr/bin/wine$' 'i386-windows' 'opt/armonia/bin/windows_calistir.sh$'; do
+    grep -qE "$g" <<<"$LISTE" || { echo "HATA: Windows katmaninda $g yok"; exit 6; }
+  done
+else
+  grep -qE 'usr/bin/wine$|i386-linux-gnu' <<<"$LISTE" && { echo "HATA: WINDOWS=0 ama imajda Wine/i386 var"; exit 6; }
 fi
 # Temel masaustu imaji: Coklu UYAP bileseni olmamali (acilista Rust kodu calismaz; kullanici karari 2026-11-19)
 if unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null | grep -qE 'opt/armonia/cokluuyap|armonia-kiosk\.service|kiosk_oturum'; then

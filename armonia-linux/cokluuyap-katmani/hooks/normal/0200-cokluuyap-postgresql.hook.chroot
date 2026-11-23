@@ -1,0 +1,32 @@
+#!/bin/sh
+# Coklu UYAP katmani: PostgreSQL sertlestirmesi (live-build chroot kancasi). 0100-armonia kancasindan SONRA calisir.
+# Kaynak: 59fb985'teki 0100-armonia.hook.chroot "Faz 2 PostgreSQL" blogu (guvenlik-denetci O2, O3, D1), 19.11'de
+# temel masaustune gecerken kancadan silinmisti; katman geri baglaninca imaja bu dosyayla girer.
+# Katman baglanirken: config/hooks/normal/ altina kopyalanir; paket listesi ../../package-lists/cokluuyap.list.chroot.
+# Claude, 2026-11-14 (ilk yazim) / 2026-11-23 (katmana tasindi).
+set -e
+command -v pg_lsclusters >/dev/null || { echo "HATA: Coklu UYAP katmani PostgreSQL ister (cokluuyap.list.chroot)"; exit 1; }
+
+# Debian'in imaja kurdugu varsayilan kume (canli sistemde RAM'de, kalici degil) kaldirilir; Debian servisleri
+# maskelenir. Sunucu kasada armonia-postgresql.service ile calisir (../kasa/).
+pg_lsclusters -h | while read -r surum ad _; do pg_dropcluster --stop "$surum" "$ad" || true; done
+# guvenlik-denetci O2: silme dogrulanir, artik dizinler temizlenir
+[ -z "$(pg_lsclusters -h)" ] || { echo "HATA: Debian PostgreSQL kumesi silinemedi"; exit 1; }
+rm -rf /etc/postgresql/*/ /var/lib/postgresql/*/
+systemctl mask postgresql.service 'postgresql@.service'
+
+# O3: ssl-cert'in derlemede bir kez urettigi snakeoil anahtari HER CIHAZDA AYNIDIR -> kaldirilir ve dogrulanir
+rm -f /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
+[ ! -e /etc/ssl/private/ssl-cert-snakeoil.key ] || { echo "HATA: snakeoil anahtari silinemedi"; exit 1; }
+gpasswd -d postgres ssl-cert 2>/dev/null || true
+
+# D1: soket postgres grubunda 0770; PG veri dizini 0700 -> grup uyeligi veriye degil yalniz sokete erisim verir.
+# Eski kiosk duzeninde 'kiosk' bu gruptaydi. Yeni duzende uyap_app'i calistiracak kullanici katman baglanirken
+# secilecek (BENIOKU.md). 'armonia' masaustu kullanicisi kum havuzunda OLMADIGINDAN gruba otomatik EKLENMEZ:
+# eklenirse Thunar/LibreOffice dahil butun oturum veritabani soketine erisir.
+if [ -n "${COKLUUYAP_KULLANICI:-}" ]; then
+  id "$COKLUUYAP_KULLANICI" >/dev/null 2>&1 || { echo "HATA: $COKLUUYAP_KULLANICI kullanicisi yok"; exit 1; }
+  usermod -aG postgres "$COKLUUYAP_KULLANICI"
+else
+  echo "NOT: COKLUUYAP_KULLANICI verilmedi; postgres grubuna kimse eklenmedi"
+fi

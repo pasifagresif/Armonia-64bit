@@ -4,3 +4,7 @@ waybar -c /etc/armonia/waybar/ust.jsonc -s /etc/armonia/waybar/ust.css >/dev/nul
 waybar -c /etc/armonia/waybar/dock.jsonc -s /etc/armonia/waybar/dock.css >/dev/null 2>&1 &
 mako -c /etc/armonia/mako.ini >/dev/null 2>&1 &
 /opt/armonia/bin/bosta.sh >/dev/null 2>&1 &
+# Polkit parola penceresi (G3, 23.11). Canli ISO'da politika parola istemez, pencere bosta bekler.
+# Cokerse yeniden baslar (denetci G3-c): yoksa Ayarlar degisiklikleri sessizce basarisiz olur
+# Oturum bitince (Wayland soketi gidince) dongu de biter (denetci A-3)
+( while [ -S "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}" ]; do /usr/bin/lxpolkit >/dev/null 2>&1; sleep 2; done ) &

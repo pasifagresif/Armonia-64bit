@@ -1,0 +1,29 @@
+#!/bin/sh
+# Armonia Windows katmani (yalniz ISO, WINDOWS=1): Debian Wine (32 + 64 bit), bubblewrap, cifs-utils.
+# Kullanici karari 23.11: Icramatik 32 bit -> i386 + wine32; ISO'da ia32_emulation=0 kaldirildi (iso_derle.sh).
+# 0100-armonia kancasindan ONCE calisir. Claude, 2026-11-23.
+set -e
+dpkg --add-architecture i386
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  wine wine64 wine32:i386 libwine libwine:i386 bubblewrap cifs-utils cage \
+  libwayland-client0:i386 libxkbcommon0:i386 libfontconfig1:i386 libfreetype6:i386
+# Onerilen ama Recommends olabilecek paketler (denetci B-7): preloader (32 bit adres alani), Wine yazi tipleri
+for p in wine32-preloader:i386 wine64-preloader fonts-wine; do
+  apt-cache show "${p%%:*}" >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$p" || true
+done
+# Wine yalniz ic ice Wayland kafesinde (cage) calisir; ana masaustu soketini gormez (denetci B-1)
+[ -x /usr/bin/cage ] || { echo "HATA: cage yok (Wine kafesi)"; exit 1; }
+# Denetimler: 32 bit Wine, Wayland surucusu, kum havuzu
+[ -x /usr/bin/bwrap ] || { echo "HATA: bubblewrap yok"; exit 1; }
+[ -d /usr/lib/wine/i386-windows ] || ls -d /usr/lib/*/wine/i386-windows >/dev/null 2>&1 \
+  || { echo "HATA: 32 bit Wine (i386-windows) yok"; exit 1; }
+ls /usr/lib/*/wine/*-unix/winewayland.so >/dev/null 2>&1 \
+  || echo "UYARI: winewayland.so bulunamadi; Wine pencereleri Xwayland'siz acilmayabilir"
+# bwrap setuid OLMAMALI (Debian: kullanici ad alanlariyla calisir)
+[ ! -u /usr/bin/bwrap ] || { echo "HATA: bwrap setuid"; exit 1; }
+# mount.cifs setuid OLMAMALI: paylasimi yalniz root (armonia-paylasim.service) baglar
+[ ! -u /usr/sbin/mount.cifs ] || chmod u-s /usr/sbin/mount.cifs
+# Wine'in masaustu/menu ve MIME iliskilendirmesi yapmasi istenmez (winemenubuilder baslaticida da kapali)
+rm -f /usr/share/applications/wine*.desktop
+systemctl enable armonia-paylasim.service

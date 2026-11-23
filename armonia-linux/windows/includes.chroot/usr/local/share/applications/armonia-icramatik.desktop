@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=İcramatik
+Comment=Ağdaki İcramatik (Windows programı, ağsız kum havuzunda)
+Exec=/opt/armonia/bin/windows_calistir.sh
+Icon=applications-office
+Categories=Office;
+Terminal=false

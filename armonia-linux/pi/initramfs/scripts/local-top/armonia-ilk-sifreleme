@@ -1,0 +1,197 @@
+#!/bin/sh
+# Armonia Pi: ilk acilista kok bolumu YERINDE LUKS2 ile sifreler (initramfs, local-top). Claude, 2026-11-23.
+# Plan: docs/claude-notlar/planlar/guvenlik-katmanlari-geri.md G1. Kullanici karari 23.11: LUKS2, TEK PAROLA
+# (disk + 'armonia' kullanicisi), parola kurali 14.11 kararidir (kasa_parola_kurali.sh ile ayni).
+#
+# Neden ilk acilista: imaj derlemede sifrelenseydi ayni imajdan yazilan her bellek AYNI ana anahtari tasirdi
+# (parola degisse de ana anahtar degismez). Yerinde sifreleme her cihaza kendi ana anahtarini verir.
+#
+# Calisma kosulu: cmdline'da armonia.ilk_sifreleme=1 ve armonia.kok=<kok bolum, or. PARTUUID=...-02>.
+# Durumlar: (a) bolum sifresiz -> parola sor, buyut, sifrele, ac;
+#           (b) sifreleme yarim kalmis (elektrik kesildi) -> parola sor, kaldigi yerden devam, ac;
+#           (c) sifreli -> parola sor, ac.
+# Uc durumda da, kok dosya sisteminde /etc/armonia/sifreleme-yapildi yoksa son yapilandirma (dosya sistemi
+# buyutme, kullanici parolasi, crypttab, fstab) YENIDEN yapilir: her adim tekrar edilebilir, isaret en son yazilir
+# (guvenlik-denetci 23.11 K1). Son adim servisi initramfs'i crypttab ile yeniden uretip bayragi kaldirir; ondan
+# sonra cryptroot acar, bu betik calismaz.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+
+grep -qw 'armonia.ilk_sifreleme=1' /proc/cmdline || exit 0
+. /scripts/functions
+export LC_ALL=C
+AD=armonia-kok
+HARITA=/dev/mapper/$AD
+G=/armonia-kok-gecici
+
+mesaj() {
+  if command -v plymouth >/dev/null 2>&1 && plymouth --ping 2>/dev/null; then
+    plymouth display-message --text="$1"
+  else
+    echo "$1" > /dev/console
+  fi
+}
+dur() {  # kurtarilamaz hata: kabuga dusmez, makine durur (yarim yapilandirmayla acilis yok)
+  mesaj "ARMONIA HATA: $1"
+  log_failure_msg "armonia-ilk-sifreleme: $1"
+  while :; do sleep 3600; done
+}
+sor() { /lib/cryptsetup/askpass "$1"; }
+
+# 14.11 parola kurali (kasa_parola_kurali.sh'in POSIX karsiligi): >=10, yalniz yazdirilabilir ASCII,
+# buyuk + kucuk harf + rakam + sembol.
+kural() {
+  p=$1
+  case "$p" in *[!\ -~]*) echo "Turkce/ASCII disi karakter olamaz"; return 1 ;; esac
+  [ ${#p} -ge 10 ] || { echo "En az 10 karakter olmali"; return 1; }
+  case "$p" in *[A-Z]*) ;; *) echo "En az bir buyuk harf gerekli"; return 1 ;; esac
+  case "$p" in *[a-z]*) ;; *) echo "En az bir kucuk harf gerekli"; return 1 ;; esac
+  case "$p" in *[0-9]*) ;; *) echo "En az bir rakam gerekli"; return 1 ;; esac
+  case "$p" in *[!A-Za-z0-9\ ]*) ;; *) echo "En az bir sembol gerekli (- * . , ! ? + %)"; return 1 ;; esac
+  return 0
+}
+
+bagli() { grep -q " $1 " /proc/mounts; }
+fs_denetle() {  # e2fsck: 0-3 duzeltildi/temiz, >=4 kurtarilamaz
+  e2fsck -fy "$1" >/dev/null 2>&1; rc=$?
+  [ $rc -lt 4 ] || dur "dosya sistemi denetimi basarisiz ($1, e2fsck $rc)"
+}
+
+# Son yapilandirma: tekrar edilebilir. $1 = parola. Isaret dosyasi EN SON yazilir.
+# Son yapilandirma daha once bitmis mi? (salt okunur bakilir; e2fsck/resize2fs her acilista calismasin, G1-a)
+isaretli() {
+  [ -e "$HARITA" ] || return 1
+  mkdir -p "$G"
+  mount -o ro -t ext4 "$HARITA" "$G" 2>/dev/null || return 1
+  r=1; [ -e "$G/etc/armonia/sifreleme-yapildi" ] && r=0
+  umount "$G"
+  return $r
+}
+
+son_yapilandir() {
+  isaretli && return 0
+  mkdir -p "$G"
+  fs_denetle "$HARITA"; resize2fs "$HARITA" >/dev/null 2>&1 || true
+  mount -t ext4 "$HARITA" "$G" || dur "kok dosya sistemi baglanamadi"
+  mount -o bind /dev "$G/dev"; mount -t proc proc "$G/proc"; mount -t sysfs sysfs "$G/sys"
+  printf 'armonia:%s\n' "$1" | chroot "$G" /usr/sbin/chpasswd || dur "kullanici parolasi ayarlanamadi"
+  LUKS_UUID=$(cryptsetup luksUUID "$DEV") || dur "LUKS UUID okunamadi"
+  # 'initramfs': cryptsetup-initramfs bu kaydi initramfs'e koyar. tries=0: parola sinirsiz sorulur (kasa ile ayni).
+  # discard bilerek YOK (kasa D1: TRIM sifresiz blok deseni sizdirir).
+  printf '# Armonia (ilk acilista uretildi)\n%s UUID=%s none luks,initramfs,tries=0,no-read-workqueue,no-write-workqueue\n' \
+    "$AD" "$LUKS_UUID" > "$G/etc/crypttab.yeni" && mv -f "$G/etc/crypttab.yeni" "$G/etc/crypttab"
+  chmod 0644 "$G/etc/crypttab"
+  # fstab kok satiri: eski PARTUUID artik LUKS kabi -> systemd-fsck-root yanlis aygiti denetlemesin
+  sed -i -E "s|^[^#[:space:]]+[[:space:]]+/[[:space:]]|$HARITA / |" "$G/etc/fstab"
+  grep -q "^$HARITA / " "$G/etc/fstab" || dur "fstab kok satiri guncellenemedi"
+  sync
+  touch "$G/etc/armonia/sifreleme-yapildi"
+  sync
+  umount "$G/sys" "$G/proc" "$G/dev"; umount "$G" || dur "kok dosya sistemi ayrilamadi"
+}
+
+# dm-crypt modulleri (Pi cekirdeginde modul; cryptroot'tan once calisabiliriz) (denetci O4)
+modprobe -q dm_mod 2>/dev/null; modprobe -q dm_crypt 2>/dev/null
+
+# Kok bolum aygiti (cmdline armonia.kok=)
+KOK=""
+for a in $(cat /proc/cmdline); do case "$a" in armonia.kok=*) KOK=${a#armonia.kok=} ;; esac; done
+[ -n "$KOK" ] || dur "armonia.kok parametresi yok"
+DEV=""
+i=0
+while [ $i -lt 60 ]; do
+  DEV=$(resolve_device "$KOK" 2>/dev/null) && [ -b "$DEV" ] && break
+  DEV=""; i=$((i + 1)); sleep 0.5
+done
+[ -n "$DEV" ] || dur "kok bolum bulunamadi ($KOK)"
+# Ayni imajdan yazilmis ikinci bir bellek takiliysa yanlis disk sifrelenmesin (denetci O1)
+case "$KOK" in
+  PARTUUID=*|UUID=*|LABEL=*)
+    n=$(blkid -t "$KOK" -o device 2>/dev/null | wc -l)
+    [ "$n" -le 1 ] || dur "ayni kimlikli $n disk takili. Yalniz Armonia bellegi takiliyken acin." ;;
+esac
+mkdir -p /run/cryptsetup
+
+parola_ac() {  # var olan LUKS2'yi acar; yanlis parolada yeniden sorar. Parolayi P'de birakir (son_yapilandir icin).
+  while :; do
+    P=$(sor "Armonia disk parolasi: ") || continue
+    if [ -e "$HARITA" ]; then  # cryptroot acmis: parolayi yine de dogrula (chpasswd yanlis parola yazmasin)
+      printf '%s' "$P" | cryptsetup open --test-passphrase --key-file=- "$DEV" && return 0
+      mesaj "Parola yanlis, tekrar deneyin."; continue
+    fi
+    printf '%s' "$P" | cryptsetup open --key-file=- "$DEV" "$AD" && return 0
+    mesaj "Parola yanlis, tekrar deneyin."
+  done
+}
+
+if cryptsetup isLuks "$DEV" 2>/dev/null; then
+  if cryptsetup luksDump "$DEV" 2>/dev/null | grep -q 'online-reencrypt'; then
+    # (b) Yarim kalmis sifreleme: kaldigi yerden. Yanlis parola (cikis 2) ile diger hatalar ayrilir (denetci O6).
+    mesaj "Sifreleme yarim kalmis, devam edilecek. KAPATMAYIN."
+    onarildi=0
+    while :; do
+      P=$(sor "Armonia disk parolasi (sifreleme devam edecek): ") || continue
+      printf '%s' "$P" | cryptsetup reencrypt --resume-only --key-file=- --batch-mode "$DEV"; rc=$?
+      [ $rc -eq 0 ] && break
+      [ $rc -eq 2 ] && { mesaj "Parola yanlis, tekrar deneyin."; continue; }
+      [ $onarildi -eq 0 ] || dur "sifreleme surdurulemedi (cryptsetup $rc)"
+      mesaj "Kesintiden kurtariliyor..."
+      printf '%s' "$P" | cryptsetup repair --key-file=- --batch-mode "$DEV" || dur "kurtarma basarisiz"
+      onarildi=1
+    done
+    [ -e "$HARITA" ] || printf '%s' "$P" | cryptsetup open --key-file=- "$DEV" "$AD" || dur "sifreli bolum acilamadi"
+  else
+    # (c) Sifreli. cryptroot zaten acmissa ve son yapilandirma bitmisse parola ikinci kez sorulmaz (G1-a).
+    if isaretli; then echo "ROOT=$HARITA" >> /conf/param.conf; exit 0; fi
+    parola_ac
+  fi
+  son_yapilandir "$P"
+  unset P
+  echo "ROOT=$HARITA" >> /conf/param.conf
+  exit 0
+fi
+
+# (a) Ilk acilis: sifresiz kok bolum
+mesaj "Armonia ilk acilis: diskiniz sifrelenecek. Parolayi unutursaniz VERI KURTARILAMAZ."
+sleep 4
+while :; do
+  P1=$(sor "Yeni parola (en az 10; buyuk/kucuk harf, rakam, sembol; Turkce harf yok; klavye TR-Q): ") || continue
+  neden=$(kural "$P1") || { mesaj "Parola uygun degil: $neden"; sleep 3; continue; }
+  P2=$(sor "Parolayi tekrar yazin: ") || continue
+  [ "$P1" = "$P2" ] && break
+  mesaj "Parolalar ayni degil, bastan."; sleep 2
+done
+unset P2
+
+# Bolumu diskin sonuna kadar buyut (sifrelemeden once; sonra yalniz dosya sistemi buyutulur)
+AYGIT_ADI=$(basename "$DEV")
+NO=$(cat "/sys/class/block/$AYGIT_ADI/partition" 2>/dev/null) || dur "bolum numarasi okunamadi"
+DISK=/dev/$(basename "$(readlink -f "/sys/class/block/$AYGIT_ADI/..")")
+ONCE=$(cat "/sys/class/block/$AYGIT_ADI/size")
+echo ", +" | sfdisk --no-reread --no-tell-kernel --wipe-partitions never -N "$NO" "$DISK" >/dev/null 2>&1 \
+  || log_warning_msg "armonia-ilk-sifreleme: bolum buyutulemedi (bolum boyuyla devam)"
+partx -u -n "$NO" "$DISK" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+log_success_msg "armonia-ilk-sifreleme: bolum $ONCE -> $(cat "/sys/class/block/$AYGIT_ADI/size") kesim"
+
+fs_denetle "$DEV"
+
+# Sifre: AES komutlari varsa (Pi 5) AES-XTS 512 bit (= AES-256), yoksa (Pi 4) Adiantum. TRIM yok (kasa D1).
+if grep -qw aes /proc/cpuinfo; then
+  SIFRE="--cipher aes-xts-plain64 --key-size 512"
+else
+  SIFRE="--cipher xchacha12,aes-adiantum-plain64 --key-size 256"
+fi
+mesaj "Disk sifreleniyor: disk boyutuna gore 1-3 saat surebilir. KAPATMAYIN. Elektrik kesilirse yeniden acin, kaldigi yerden devam eder."
+# --reduce-device-size 32M: LUKS2 basligi (16M) icin yer; derleme dosya sistemini bolum sonundan 64M kisa birakir.
+# shellcheck disable=SC2086
+printf '%s' "$P1" | cryptsetup reencrypt --encrypt --type luks2 --reduce-device-size 32M $SIFRE \
+  --pbkdf argon2id --key-file=- --batch-mode --progress-frequency 60 --label armonia-kok "$DEV" \
+  || dur "sifreleme basarisiz. Elektrik kesildiyse yeniden baslatin, kaldigi yerden devam eder."
+printf '%s' "$P1" | cryptsetup open --key-file=- "$DEV" "$AD" || dur "sifreli bolum acilamadi"
+son_yapilandir "$P1"
+unset P1
+mesaj "Sifreleme tamamlandi. Armonia aciliyor."
+echo "ROOT=$HARITA" >> /conf/param.conf
+exit 0

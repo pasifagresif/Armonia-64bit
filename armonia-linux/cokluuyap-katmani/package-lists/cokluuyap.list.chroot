@@ -1,0 +1,4 @@
+# Coklu UYAP katmani paketleri (temel imaja GIRMEZ; katman baglaninca config/package-lists/ altina kopyalanir).
+# Zincirleme dosya verileri icin PostgreSQL: veri kasada (../kasa/), yalniz Sunucu rolunde calisir.
+# Sertlestirme: ../hooks/normal/0200-cokluuyap-postgresql.hook.chroot
+postgresql

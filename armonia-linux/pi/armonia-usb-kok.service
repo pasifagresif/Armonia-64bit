@@ -1,0 +1,22 @@
+# Armonia Pi: USBGuard baslamadan once kok diskin USB izni (G6, 23.11). Claude, 2026-11-23.
+# Basarisiz olursa usbguard BASLAMAZ (Requires): sistem diskini kaybetmek yerine USB politikasi devre disi kalir
+# ve gunluge yazilir. Durum: systemctl status armonia-usb-kok usbguard
+[Unit]
+Description=Armonia: kok diskin USB izni
+DefaultDependencies=no
+After=local-fs.target
+Before=usbguard.service
+ConditionPathIsDirectory=/sys/bus/usb/devices
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/armonia/bin/usb_kok_izin.sh
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/usbguard
+
+[Install]
+RequiredBy=usbguard.service
