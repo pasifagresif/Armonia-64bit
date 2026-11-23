@@ -38,6 +38,12 @@ sha256sum -c "$TABAN.sha256" || { echo "HATA: taban imaj saglamasi tutmadi"; rm 
 # Adalet E-imza (resmi paket yalniz amd64): yalniz icindeki jar kullanilir, arm64 OpenJDK 21 ile calisir (20.11).
 EIMZA_DEB=adalet-eimza-tray_1.0.17_amd64.deb
 EIMZA_MD5=a1a4b3c3099df599c2d5193f2259c1aa
+# Once depodaki parcalardan (eimza-parcalar/, 23.11.2026) birlestirilir; parca yoksa resmi sunucudan indirilir.
+if [ ! -f "$EIMZA_DEB" ] && [ -f "$KAYNAK/eimza-parcalar/$EIMZA_DEB.sha256" ]; then
+  cat "$KAYNAK/eimza-parcalar/$EIMZA_DEB".parca-* > "$EIMZA_DEB"
+  sha256sum -c --quiet "$KAYNAK/eimza-parcalar/$EIMZA_DEB.sha256" \
+    && echo "E-imza paketi parcalardan birlestirildi" || { echo "UYARI: e-imza parcalari bozuk; indirilecek"; rm -f "$EIMZA_DEB"; }
+fi
 if [ ! -f "$EIMZA_DEB" ]; then
   curl -fL --retry 3 -o "$EIMZA_DEB.indiriliyor" "https://cdn.uyap.gov.tr/framework/public/$EIMZA_DEB" \
     && mv "$EIMZA_DEB.indiriliyor" "$EIMZA_DEB"
