@@ -161,3 +161,12 @@ Karşılaştırma: `59fb985` (kiosk, son sıkı sürüm) ↔ `2a6297e` (temel ma
 - Bu makinede (Windows) Pi ve ISO derlenip denenemiyor: derleme ve açılış denemesi kullanıcının Linux makinesinde.
   Her aşama betik + denetim + kullanıcının deneme çıktısıyla kapanır.
 - G1 ve G2 veri kaybı riski taşır (yerinde şifreleme, disk biçimlendirme): önce boş bellek/diskle denenir.
+
+## Çoklu UYAP menüden (23.11)
+Kullanıcı kararı: açılışta başlamasın, menüden açılsın, Linux (Rust) sürümü; ISO'da veri RAM'de; PostgreSQL yok.
+Ayrıntı: `armonia-linux/cokluuyap-katmani/BENIOKU.md` ("23.11 — menüden açılan düzen").
+Denetim (23.11): K1 (ISO'da uyap_app 0644), K2 (WorkingDirectory yok → 200/CHDIR), K3 (SYN-ACK oturum_yerel'de
+reddediliyordu → ct mark 0x8800) düzeltildi; O2 (çıkışta birim durmuyordu) ve D1–D3 düzeltildi. Açık: O1 (veri
+klasörü aynı UID'de, ayrı kullanıcı kararı), D4 (internet kapıları), D5 (LAN özellikleri kapalı).
+Sırada: imzalı güncelleme tasarımı (kullanıcı isteği 23.11: uygulamada uyarı, doğrulayıp indirme, sahte güncelleme
+yüklenemesin; açık/gizli anahtar).

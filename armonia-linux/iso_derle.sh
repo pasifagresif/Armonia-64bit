@@ -1,6 +1,7 @@
 #!/bin/bash
-# Armonia ISO'sunu live-build ile derler. 2026-11-19'dan beri TEMEL MASAUSTU imaji: Coklu UYAP (uyap_app), kasa ve
-# PostgreSQL GIRMEZ (cokluuyap-katmani/ ve kasa/ rafta; Coklu UYAP asamasinda yeniden baglanacak). derle_uyap.sh gerekmez.
+# Armonia ISO'sunu live-build ile derler. 2026-11-19'dan beri temel masaustu imaji; kasa ve PostgreSQL GIRMEZ (kasa/ rafta).
+# COKLUUYAP=1 (varsayilan, 23.11): Coklu UYAP (uyap_app, Rust Linux surumu) MENUDEN acilan, kum havuzlu katman olarak
+# girer; acilista HICBIR sey baslatmaz (cokluuyap-katmani/menuden/, cokluuyap_hazirla.sh). COKLUUYAP=0: katmansiz.
 # Root ile:  wsl -d Debian -u root -- bash /mnt/c/.../armonia-linux/iso_derle.sh   (ya da: sudo bash .../iso_derle.sh)
 #   TEST=1 ... iso_derle.sh  -> test katmani da eklenir (kasa bicimlendirme, lynis), cikti armonia_test_kasa.iso
 # Cikti: ISO_DIZIN/armonia.iso  (varsayilan: /mnt/c/dev varsa orasi = C:\dev, yoksa /root/armonia-cikti)
@@ -20,6 +21,8 @@ TEST="${TEST:-0}"
 # Kullanici karari 23.11: Icramatik 32 bit -> WINDOWS=1'de ia32_emulation=0 KALDIRILIR (bilincli gevseme).
 # WINDOWS=0: Windows katmani yok, ia32_emulation=0 yerinde (tam sertlestirilmis ISO).
 WINDOWS="${WINDOWS:-1}"
+# Coklu UYAP katmani (menuden; uyap_app derle_uyap.sh ciktisindan, x86_64)
+COKLUUYAP="${COKLUUYAP:-1}"
 # TEST=1 katmani (kasa bicimlendirme/dogrulama) kasa katmanina dayanir; temel masaustu imajinda kasa yok
 [ "$TEST" = "1" ] && { echo "HATA: TEST=1 kasa katmani ister; temel imajda kullanilmaz (Coklu UYAP asamasinda geri gelecek)"; exit 1; }
 [ "$(id -u)" = "0" ] || { echo "HATA: root ile calistirin (live-build root ister)"; exit 1; }
@@ -52,7 +55,11 @@ if [ "$WINDOWS" = "1" ]; then
   EK_PARAM="$(echo "${EK_PARAM/ia32_emulation=0/}" | tr -s ' ')"
   echo "UYARI: WINDOWS=1 -> ia32_emulation=0 kaldirildi (32 bit Wine icin; kullanici karari 23.11)"
 fi
-lb config --distribution trixie --archive-areas main --debian-installer none \
+# non-free-firmware (23.11): Wi-Fi / ekran karti yazilimlari + mikrokod; imajdaki apt kaynaklarina da girer
+# (surucu.sh sonradan takilan aygit icin firmware-* kurabilsin). --firmware-chroot false: live-build butun
+# firmware paketlerini KOYMASIN, yalniz 0040-armonia-donanim-yazilimi kancasindaki liste girsin.
+lb config --distribution trixie --archive-areas "main non-free-firmware" --debian-installer none \
+  --firmware-chroot false --firmware-binary false \
   --binary-images iso-hybrid --bootloaders syslinux --apt-recommends false --memtest none \
   --iso-volume ARMONIA --chroot-squashfs-compression-type zstd \
   --bootappend-live "boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')" >/dev/null
@@ -73,6 +80,9 @@ fi
 cp -a "$KAYNAK/sertlestirme/etc/." config/includes.chroot/etc/
 # Armonia'nin kendi uygulamalari (Ayarlar, Hukuk Hesaplayici): derlenip /opt/armonia/uygulamalar'a
 bash "$KAYNAK/uygulamalari_hazirla.sh" config/includes.chroot x86_64
+if [ "$COKLUUYAP" = "1" ]; then
+  bash "$KAYNAK/cokluuyap_hazirla.sh" config/includes.chroot x86_64 config/hooks/normal
+fi
 # Plymouth temasi. (Faz 2 kasa katmani -- LUKS2 kasa + PostgreSQL -- Coklu UYAP icindi; bu imaja girmez.)
 mkdir -p config/includes.chroot/usr/share/plymouth/themes/armonia
 cp "$KAYNAK"/plymouth/armonia/* config/includes.chroot/usr/share/plymouth/themes/armonia/
@@ -104,6 +114,8 @@ find config/includes.chroot config/hooks config/bootloaders -type f -exec chmod 
 chmod 0755 config/hooks/normal/*.hook.chroot config/includes.chroot/opt/armonia/bin/*.sh
 chmod 0755 config/includes.chroot/opt/armonia/bin/ayar-yardimci config/includes.chroot/opt/armonia/uygulamalar/*
 [ -f config/includes.chroot/usr/local/bin/xdg-open ] && chmod 0755 config/includes.chroot/usr/local/bin/xdg-open
+# Coklu UYAP ikilisi (yukaridaki genel 0644 x bitini siler; kanca -x sinamasi icin, denetci 23.11 K1)
+[ -f config/includes.chroot/opt/armonia/cokluuyap/uyap_app ] && chmod 0755 config/includes.chroot/opt/armonia/cokluuyap/uyap_app
 BAS=$(date +%s)
 set +e; lb build >"$IS/build.log" 2>&1; RC=$?; set -e
 echo "lb build cikis: $RC  sure: $(( $(date +%s) - BAS )) sn"
@@ -123,9 +135,21 @@ if [ "$WINDOWS" = "1" ]; then
 else
   grep -qE 'usr/bin/wine$|i386-linux-gnu' <<<"$LISTE" && { echo "HATA: WINDOWS=0 ama imajda Wine/i386 var"; exit 6; }
 fi
-# Temel masaustu imaji: Coklu UYAP bileseni olmamali (acilista Rust kodu calismaz; kullanici karari 2026-11-19)
-if unsquashfs -l binary/live/filesystem.squashfs 2>/dev/null | grep -qE 'opt/armonia/cokluuyap|armonia-kiosk\.service|kiosk_oturum'; then
-  echo "HATA: temel imajda Coklu UYAP bileseni bulundu"; exit 5
+# Donanim yazilimlari (23.11): Wi-Fi, AMD ekran karti, Intel mikrokodu imajda olmali
+for g in 'lib/firmware/(intel/)?iwlwifi' 'lib/firmware/rtw' 'lib/firmware/amdgpu/' 'lib/firmware/intel-ucode/'; do
+  grep -qE "$g" <<<"$LISTE" || { echo "HATA: donanim yazilimi eksik: $g"; exit 8; }
+done
+echo "Donanim yazilimi dosyasi: $(grep -c 'lib/firmware/' <<<"$LISTE")"
+# Acilista Rust kodu calismaz (kullanici kararlari 19.11 ve 23.11): eski kiosk bileseni hic olmamali, Coklu UYAP
+# birimi hicbir .wants'ta olmamali. COKLUUYAP=1'de uygulama menuden acilmak uzere imajda olmali, 0'da hic olmamali.
+grep -qE 'armonia-kiosk\.service|kiosk_oturum|\.wants/armonia-cokluuyap' <<<"$LISTE" \
+  && { echo "HATA: imajda acilista baslayan Coklu UYAP bileseni bulundu"; exit 5; }
+if [ "$COKLUUYAP" = "1" ]; then
+  for g in 'opt/armonia/cokluuyap/uyap_app$' 'armonia-cokluuyap\.service$' 'cokluuyap_ac\.sh$' '60-armonia-cokluuyap\.rules$'; do
+    grep -qE "$g" <<<"$LISTE" || { echo "HATA: Coklu UYAP katmaninda $g yok"; exit 5; }
+  done
+else
+  grep -qE 'opt/armonia/cokluuyap' <<<"$LISTE" && { echo "HATA: COKLUUYAP=0 ama imajda Coklu UYAP var"; exit 5; }
 fi
 # DNS: live-build resolv.conf'u bos birakir; acilista tmpfiles ile resolved stub'ina baglanmali.
 # Icerik denetlenir (guvenlik-denetci D2). Boru + grep -q KULLANMA: pipefail altinda unsquashfs SIGPIPE alir

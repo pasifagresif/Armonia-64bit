@@ -5,7 +5,8 @@
 # Çıktı: $ARMONIA_CIKTI/cokluuyap/  (varsayılan ~/armonia-cikti; uyap_app + uyap_core/enjekte + webapp + SURUM)
 # Yollar betiğin kendi yerinden bulunur; ortam değişkeniyle değiştirilebilir:
 #   REPO=<depo kökü>  ARMONIA_CIKTI=<çıktı kökü>  RUYAP_KOPYA=<derleme kopyası, varsayılan ~/ruyap>
-# DİKKAT: ikili, derlendiği makinenin mimarisinde çıkar (Pi'de aarch64). Armonia imajı amd64'tür.
+# DİKKAT: ikili, derlendiği makinenin mimarisinde çıkar: x86_64 makinede ISO için, Pi'de (aarch64) Pi imajı için.
+# iso_derle.sh / pi_derle.sh (COKLUUYAP=1) çıktıyı cokluuyap_hazirla.sh ile alır; yoksa bu betiği kendileri çağırır.
 # Claude, 2026-11-13 (19.11: yollar taşınabilir yapıldı).
 set -euo pipefail
 
@@ -23,7 +24,7 @@ LOG="$CIKTI_KOK/derle.log"
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 command -v cargo >/dev/null || { echo "HATA: cargo bulunamadı (rustup kurun)"; exit 1; }
 MIMARI="$(uname -m)"
-[ "$MIMARI" = "x86_64" ] || echo "UYARI: bu makine $MIMARI; çıkan uyap_app Armonia (amd64) imajına konamaz."
+echo "Mimari: $MIMARI (x86_64 -> ISO, aarch64 -> Pi imajı; cokluuyap_hazirla.sh ELF başlığından denetler)"
 mkdir -p "$DST" "$CIKTI_KOK"
 
 # 1) Kaynağı birebir eşitle (target/ korunur → artımlı derleme). Çalışma önbelleği ve .exe kopyalanmaz.

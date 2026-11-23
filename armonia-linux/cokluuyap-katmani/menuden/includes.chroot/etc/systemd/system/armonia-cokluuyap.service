@@ -1,0 +1,81 @@
+# Armonia: Coklu UYAP (uyap_app, Rust Linux surumu) masaustu oturumunda, AYRI kum havuzunda. Claude, 2026-11-23.
+# Kullanici karari 23.11: "acilista otomatik baslamasin, kullanici menuden acsin". Bu yuzden [Install] bolumu YOK
+# (etkinlestirilemez); yalniz menu/dock kisayolu (cokluuyap_ac.sh) polkit izniyle 'systemctl start' eder
+# (60-armonia-cokluuyap.rules). systemd birimi oldugu icin tek ornek kendiliginden saglanir.
+# Kum havuzu tarayici birimiyle (armonia-tarayici@.service) ayni cizgide: ev dizininde yalniz kendi veri klasoru ve
+# ~/Belgeler/UYAP; D-Bus / systemd --user / pcscd / klavye aygitlari yok; yerel ag kapali, internet acik (UYAP).
+[Unit]
+Description=Armonia Coklu UYAP
+# nftables yeniden yuklenirse (flush ruleset) Coklu UYAP kurallari kaybolmasin: uygulama da kapanir
+After=nftables.service
+PartOf=nftables.service
+# Cokunce sinirli yeniden deneme: 5 dakikada en fazla 3 baslatma, sonra durur (eski kiosk'taki sonsuz dongu yok)
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=armonia
+Group=armonia
+Slice=armonia-cokluuyap.slice
+# Veri ve evrak klasorleri kullanici kimligiyle acilir ('+': kum havuzu disinda; BindPaths'ten once var olmali)
+ExecStartPre=+/usr/sbin/runuser -u armonia -- /usr/bin/mkdir -p -m 0700 /home/armonia/.local/share/armonia-cokluuyap /home/armonia/Belgeler/UYAP
+ExecStartPre=+/usr/sbin/nft -f /opt/armonia/nft/cokluuyap_yerel.nft
+ExecStart=/opt/armonia/bin/cokluuyap_calistir.sh
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=10
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+# '-': dizin yoksa + onekli ExecStartPre de 200/CHDIR ile dusmesin (denetci 23.11 K2); betik ayrica cd eder
+WorkingDirectory=-/home/armonia/.local/share/armonia-cokluuyap
+# Hesaplar (accounts.json), zs.sqlite3, zs_files, LAN TLS sertifikasi, onbellek: veri klasorunde.
+# Canli ISO'da (toram) bu klasor RAM'dedir ve kapaninca silinir (kullanici karari 23.11; kalicilik G2 kasasiyla).
+Environment=HOME=/home/armonia/.local/share/armonia-cokluuyap
+Environment=UYAP_DATA_DIR=/home/armonia/.local/share/armonia-cokluuyap
+Environment=XDG_CONFIG_HOME=/home/armonia/.local/share/armonia-cokluuyap/config
+Environment=XDG_CACHE_HOME=/home/armonia/.local/share/armonia-cokluuyap/cache
+Environment=XDG_DATA_HOME=/home/armonia/.local/share/armonia-cokluuyap/data
+Environment=UYAP_EVRAK_KLASORU=/home/armonia/Belgeler/UYAP
+Environment=XKB_DEFAULT_LAYOUT=tr
+Environment=LANG=tr_TR.UTF-8
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+# '-' YOK: dizin yoksa birim baslamasin (veri sessizce tmpfs'e gidip kaybolmasin)
+BindPaths=/home/armonia/.local/share/armonia-cokluuyap /home/armonia/Belgeler/UYAP
+# /run/user bos tmpfs; icine yalniz Wayland soketi (kanca: 20-calisma.conf, UID ile). bus/systemd --user YOK.
+TemporaryFileSystem=/run/user:mode=0755
+PrivateTmp=yes
+InaccessiblePaths=-/root -/srv -/var/lib/armonia -/run/postgresql -/run/armonia -/dev/input -/run/pcscd
+InaccessiblePaths=-/run/systemd/resolve/io.systemd.Resolve -/run/systemd/resolve/io.systemd.Resolve.Monitor
+DevicePolicy=closed
+DeviceAllow=char-drm rw
+# Internet acik (UYAP sunuculari), yerel ag kapali. Yerel kapilar nft ile: yalniz DNS, 5975 (e-imza), 8800 (kendi
+# vekili). Giris zinciri zaten kapali (policy drop): 0.0.0.0:8800 dinlemesi LAN'dan erisilemez.
+IPAddressAllow=localhost
+IPAddressDeny=link-local multicast 255.255.255.255/32 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+LimitCORE=0
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+KeyringMode=private
+UMask=0077
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# MemoryDenyWriteExecute KAPALI: Mesa llvmpipe JIT (GPU'suz makinede egui yazilim GL'e duser)
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @obsolete @mount @swap @reboot @module @raw-io @cpu-emulation @debug @clock
+SystemCallErrorNumber=EPERM

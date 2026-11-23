@@ -1,0 +1,3 @@
+# Tarayici dilimi -> Coklu UYAP yerel vekili (127.0.0.1:8800). tarayici_yerel.nft zinciri bosaltip yeniden
+# doldurduktan SONRA calisir; 'insert' kurali en basa koyar. Claude, 2026-11-23.
+insert rule inet filter tarayici_yerel socket cgroupv2 level 2 "armonia.slice/armonia-tarayici.slice" ip daddr 127.0.0.1 tcp dport 8800 accept

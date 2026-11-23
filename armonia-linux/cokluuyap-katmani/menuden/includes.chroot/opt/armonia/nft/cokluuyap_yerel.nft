@@ -1,0 +1,20 @@
+# Coklu UYAP dilimi (armonia-cokluuyap.slice): yerelde YALNIZ DNS (resolved), Adalet E-imza (5975) ve kendi vekili
+# (8800); yerel ag kapali; internet acik. Sondaki 'accept', paketin ardindan gelen oturum_yerel zincirine
+# (8800'u reddeder) dusmesini onler. Birim baslarken yuklenir (cgroup yolu ancak dilim varken cozulur).
+# Masaustu oturumunun geri kalani 8800'e GIDEMEZ (vekilde UYAP oturumu var). Claude, 2026-11-23.
+flush chain inet filter cokluuyap_giris
+# Giris: 8800'e gelen yeni baglanti, dinleyen soket Coklu UYAP diliminde ise isaretlenir; cikis zincirindeki
+# 'ct mark 0x8800 ct direction reply accept' vekilin yanitlarini (SYN-ACK dahil) gecirir (denetci 23.11 K3)
+add rule inet filter cokluuyap_giris iif "lo" tcp dport 8800 ct state new socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ct mark set 0x8800
+flush chain inet filter cokluuyap_yerel
+# Kurulmus baglantilarin paketleri (alt soket tam sokettir, dilim bilgisi dinleyiciden gelir)
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ct state established,related accept
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" meta l4proto { tcp, udp } th dport 53 reject
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr 127.0.0.1 tcp dport { 5975, 8800 } accept
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr ::1 tcp dport { 5975, 8800 } accept
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr 127.0.0.0/8 reject
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr ::1 reject
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 255.255.255.255 } reject
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr { fc00::/7, fe80::/10 } reject
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" accept

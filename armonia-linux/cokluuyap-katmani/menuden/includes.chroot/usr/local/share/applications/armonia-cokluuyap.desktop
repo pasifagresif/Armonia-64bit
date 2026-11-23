@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Çoklu UYAP
+Comment=Birden çok UYAP hesabı, iş listesi, icra takibi
+Exec=/opt/armonia/bin/cokluuyap_ac.sh
+Icon=system-users
+Categories=Office;
+Terminal=false

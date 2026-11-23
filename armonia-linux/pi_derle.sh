@@ -113,9 +113,14 @@ cp -a "$KAYNAK/sertlestirme/etc/." "$K/etc/"
 mkdir -p "$K/usr/share/plymouth/themes/armonia"
 cp "$KAYNAK"/plymouth/armonia/* "$K/usr/share/plymouth/themes/armonia/"
 bash "$KAYNAK/uygulamalari_hazirla.sh" "$K" aarch64
+# Coklu UYAP (23.11): menuden acilan kum havuzlu katman; uyap_app arm64 derle_uyap.sh ciktisindan. COKLUUYAP=0: yok.
+COKLUUYAP="${COKLUUYAP:-1}"
+if [ "$COKLUUYAP" = "1" ]; then
+  bash "$KAYNAK/cokluuyap_hazirla.sh" "$K" aarch64 "$K/tmp/kanca-cokluuyap"
+fi
 # Windows'tan gelmis olabilecek CR satir sonlari
 find "$K/opt/armonia" "$K/etc/armonia" "$K/etc/systemd/system" -type f \
-  ! -path "$K/opt/armonia/uygulamalar/*" -exec sed -i 's/\r$//' {} +
+  ! -path "$K/opt/armonia/uygulamalar/*" ! -path "$K/opt/armonia/cokluuyap/*" -exec sed -i 's/\r$//' {} +
 chmod 0755 "$K"/opt/armonia/bin/*.sh "$K/opt/armonia/bin/ayar-yardimci" "$K/usr/local/bin/xdg-open"
 # 23.11 (G1): deneme isareti KALDIRILDI. Pi imaji kalici (diske yazar); kilit ve parola canli sistem gibi kapali
 # kalamaz. Ilk acilista LUKS2 + tek parola (disk + 'armonia' kullanicisi) belirlenir.
@@ -166,6 +171,10 @@ done
 cp "$KAYNAK/config/hooks/normal/0100-armonia.hook.chroot" "$K/tmp/kanca"
 echo "Armonia kancasi calisiyor"
 chroot "$K" env ARMONIA_PI=1 /bin/sh /tmp/kanca
+if [ "$COKLUUYAP" = "1" ]; then
+  chroot "$K" /bin/sh /tmp/kanca-cokluuyap/0210-cokluuyap-menuden.hook.chroot
+  rm -rf "$K/tmp/kanca-cokluuyap"
+fi
 # G6 (23.11): USBGuard Pi'de yeniden ACIK. 20.11'de kapatilma nedeni (kok USB bellegi acilista bekletip sistemi
 # dusurmesi) armonia-usb-kok.service ile cozuldu: usbguard'dan once kok disk icin dar izin kurali (ozet + kimlik +
 # seri + yalniz yigin depolama arayuzu) yazilir. "Takinca sor" fiziksel onayla (cikar + tak) calisir.

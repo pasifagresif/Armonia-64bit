@@ -1,0 +1,53 @@
+#!/bin/sh
+# Coklu UYAP katmani (menuden acilan duzen, 23.11). ISO'da live-build kancasi, Pi'de chroot icinde calisir;
+# 0100-armonia'dan SONRA (armonia kullanicisi ve dock/politika dosyalari hazir olmali). Claude, 2026-11-23.
+# Kullanici karari 23.11: "acilista otomatik baslamasin, kullanici menuden acsin; Linux (Rust) surumu calissin".
+set -eu
+A=/opt/armonia/cokluuyap
+[ -f "$A/uyap_app" ] || { echo "HATA: $A/uyap_app yok"; exit 1; }
+[ -d "$A/webapp" ] && [ -d "$A/uyap_core/enjekte" ] || { echo "HATA: $A altinda webapp/enjekte yok"; exit 1; }
+# Uygulama dizini root'a ait ve salt okunur (kullanici surecleri ikiliyi/arayuz dosyalarini degistiremez)
+chown -R root:root "$A"
+find "$A" -type d -exec chmod 0755 {} +
+find "$A" -type f -exec chmod 0644 {} +
+chmod 0755 "$A/uyap_app" /opt/armonia/bin/cokluuyap_ac.sh /opt/armonia/bin/cokluuyap_calistir.sh
+chmod 0644 /etc/polkit-1/rules.d/60-armonia-cokluuyap.rules /etc/apparmor.d/opt.armonia.cokluuyap.uyap_app
+
+# Veri ve evrak klasorleri imajda hazir (birimin WorkingDirectory/BindPaths'i icin; denetci 23.11 K2).
+# Birimdeki runuser satiri, kullanici silerse yeniden acar.
+install -d -o armonia -g armonia -m 0700 /home/armonia/.local/share/armonia-cokluuyap
+install -d -o armonia -g armonia -m 0700 /home/armonia/Belgeler/UYAP
+
+# /run/user tmpfs icine yalniz Wayland soketi (UID kancada belli olur; tarayicidaki 20-calisma.conf gibi)
+U=$(id -u armonia)
+install -d -m 0755 /etc/systemd/system/armonia-cokluuyap.service.d
+printf '# Kanca uretti (armonia UID=%s). Kum havuzunda /run/user icinde yalniz Wayland soketi.\n[Service]\nBindPaths=/run/user/%s/wayland-0\n' \
+  "$U" "$U" > /etc/systemd/system/armonia-cokluuyap.service.d/20-calisma.conf
+
+# Dock'a "Coklu UYAP" kutucugu (en basa)
+D=/etc/armonia/waybar/dock.jsonc
+sed -i -e 's|"modules-center": \["custom/uyap",|"modules-center": ["custom/cokluuyap", "custom/uyap",|' \
+  -e '/^  "custom\/uyap":/i\  "custom/cokluuyap": { "format": "Çoklu\\nUYAP", "justify": "center", "tooltip-format": "Çoklu UYAP (kum havuzunda)", "on-click": "/opt/armonia/bin/cokluuyap_ac.sh" },' "$D"
+grep -q '"custom/cokluuyap", "custom/uyap"' "$D" && grep -q '^  "custom/cokluuyap":' "$D" \
+  || { echo "HATA: dock'a Coklu UYAP eklenemedi"; exit 1; }
+
+# Tarayici politikasi: yerel vekil (http://127.0.0.1:8800) izin listesine. Tarayicinin 8800'e ag izni:
+# armonia-tarayici@.service.d/30-cokluuyap.conf (nft). Masaustu oturumunun geri kalani 8800'e gidemez.
+P=/etc/chromium/policies/managed/armonia.json
+grep -q '"http://127.0.0.1:8800"' "$P" || sed -i 's|^  "URLAllowlist": \[$|  "URLAllowlist": [\n    "http://127.0.0.1:8800",|' "$P"
+grep -q '^    "http://127.0.0.1:8800",$' "$P" || { echo "HATA: tarayici politikasina 8800 eklenemedi"; exit 1; }
+
+# Acilista baslatan HICBIR sey olmamali: birim etkinlestirilemez ([Install] yok), eski kiosk birimi yok
+if find /etc/systemd /usr/lib/systemd /etc/xdg/autostart /etc/armonia -name '*cokluuyap*' -path '*.wants*' 2>/dev/null | grep -q .; then
+  echo "HATA: armonia-cokluuyap acilista baslatiliyor (.wants baglantisi)"; exit 1
+fi
+grep -q '^\[Install\]' /etc/systemd/system/armonia-cokluuyap.service && { echo "HATA: birimde [Install] var"; exit 1; }
+grep -rqs 'uyap_app\|cokluuyap' /etc/armonia/labwc/autostart && { echo "HATA: labwc autostart Coklu UYAP baslatiyor"; exit 1; }
+for f in /etc/systemd/system/armonia-kiosk.service /opt/armonia/bin/kiosk_oturum.sh; do
+  [ ! -e "$f" ] || { echo "HATA: eski kiosk dosyasi imajda: $f"; exit 1; }
+done
+# AppArmor profili sozdizimi (yuklemeden)
+if command -v apparmor_parser >/dev/null; then
+  apparmor_parser -Q -K /etc/apparmor.d/opt.armonia.cokluuyap.uyap_app || { echo "HATA: AppArmor profili bozuk"; exit 1; }
+fi
+echo "Coklu UYAP katmani hazir ($(sed -n 's/^surum=//p' "$A/SURUM" 2>/dev/null))"
