@@ -23,8 +23,21 @@ if [ "$(uname -m)" != "x86_64" ] && [ "${ZORLA:-0}" != "1" ]; then
   echo "HATA: bu makine $(uname -m); Armonia imaji amd64 (e-imza paketi amd64). ZORLA=1 ile gecilir."; exit 1
 fi
 [ -d "$KAYNAK/config" ] || { echo "HATA: armonia-linux kaynagi yok: $KAYNAK"; exit 1; }
+# E-imza paketi (70 MB) depoda eimza-parcalar/ altinda 10 MB'lik parcalar halinde durur (tek dosya GitHub'a
+# yuklenemedi, 23.11.2026). Paket config/packages.chroot/ altinda yoksa parcalar birlestirilip sha256 denetlenir.
+if ! ls "$KAYNAK"/config/packages.chroot/adalet-eimza-tray_*_amd64.deb >/dev/null 2>&1; then
+  for sha in "$KAYNAK"/eimza-parcalar/*.deb.sha256; do
+    [ -f "$sha" ] || continue
+    deb=$(basename "$sha" .sha256)
+    mkdir -p "$KAYNAK/config/packages.chroot"
+    cat "$KAYNAK/eimza-parcalar/$deb".parca-* > "$KAYNAK/config/packages.chroot/$deb"
+    (cd "$KAYNAK/config/packages.chroot" && sha256sum -c --quiet "$sha") \
+      || { rm -f "$KAYNAK/config/packages.chroot/$deb"; echo "HATA: e-imza parcalari bozuk ($deb)"; exit 1; }
+    echo "E-imza paketi parcalardan birlestirildi: $deb"
+  done
+fi
 ls "$KAYNAK"/config/packages.chroot/adalet-eimza-tray_*_amd64.deb >/dev/null 2>&1 \
-  || echo "UYARI: e-imza paketi yok (depoda tutulmuyor): config/packages.chroot/ altina indirin, bkz. docs/GUNCEL_DURUM_2026-11-19.md"
+  || echo "UYARI: e-imza paketi yok: config/packages.chroot/ altina indirin, bkz. docs/GUNCEL_DURUM_2026-11-19.md"
 mkdir -p "$IS"; cd "$IS"
 # Paket onbellegi Faz 0 test derlemesinden devralinir (indirme suresi kisalir)
 [ -d cache ] || { [ -d /root/iso-test/cache ] && cp -a /root/iso-test/cache . || true; }
