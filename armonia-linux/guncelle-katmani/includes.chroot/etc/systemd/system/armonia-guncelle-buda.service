@@ -1,0 +1,51 @@
+# Armonia: acilista, Coklu UYAP henuz calismazken etkin disindaki eski guncelleme surumlerini siler. Kurulum hicbir
+# surumu silmez (o an calisan surumun dosyalari kaybolmasin; denetci 24.11 O-4). Claude, 2026-11-24.
+[Unit]
+Description=Armonia Coklu UYAP eski guncelleme surumlerini temizle
+ConditionKernelCommandLine=!boot=live
+After=local-fs.target systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+User=armonia-guncelle
+Group=armonia-guncelle
+ExecStart=/opt/armonia/guncelle/armonia-guncelle buda
+ReadWritePaths=/var/lib/armonia-guncelle/cokluuyap /var/lib/armonia-guncelle/durum
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=64M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# /proc/cmdline okunur (canli sistem denetimi); baska surecler gorunmez
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+LimitCORE=0
+UMask=0022
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+InaccessiblePaths=-/run/armonia -/run/armonia-imza -/run/pcscd -/run/postgresql -/run/dbus -/var/lib/armonia -/var/lib/armonia-imza -/media -/mnt
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

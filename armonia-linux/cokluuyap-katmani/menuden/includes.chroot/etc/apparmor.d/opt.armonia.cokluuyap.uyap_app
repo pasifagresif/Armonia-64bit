@@ -8,7 +8,9 @@ abi <abi/4.0>,
 include <tunables/global>
 
 
-profile uyap_app /opt/armonia/cokluuyap/uyap_app flags=(attach_disconnected, complain) {
+# 24.11: imzali guncelleme kurulursa ikili /var/lib/armonia-guncelle/cokluuyap/<surum>/uyap_app yolundan calisir;
+# profil o yola da baglanir, yoksa guncellenen surum profilsiz kalirdi (denetci 24.11 K1).
+profile uyap_app /{opt/armonia/cokluuyap,var/lib/armonia-guncelle/cokluuyap/[0-9]*}/uyap_app flags=(attach_disconnected, complain) {
   include <abstractions/base>
   include <abstractions/nameservice>
   include <abstractions/fonts>
@@ -22,6 +24,11 @@ profile uyap_app /opt/armonia/cokluuyap/uyap_app flags=(attach_disconnected, com
   /opt/armonia/cokluuyap/uyap_app mr,
   /opt/armonia/cokluuyap/ r,
   /opt/armonia/cokluuyap/** r,
+  # Imzali guncelleme (armonia-guncelle; dogrulanmis, salt okunur agac). 'gelen/' (dogrulanmamis) dahil DEGIL.
+  /var/lib/armonia-guncelle/cokluuyap/[0-9]*/uyap_app mr,
+  /var/lib/armonia-guncelle/cokluuyap/[0-9]*/ r,
+  /var/lib/armonia-guncelle/cokluuyap/[0-9]*/** r,
+  deny /var/lib/armonia-guncelle/gelen/** rwlmx,
 
   # Veri klasoru (HOME, UYAP_DATA_DIR): static_cache, accounts.json, zs.sqlite3(-wal/-shm), zs_files/, config/
   owner /home/*/.local/share/armonia-cokluuyap/ r,

@@ -1,0 +1,60 @@
+#!/bin/sh
+# Armonia güncelleme katmanı: Çoklu UYAP'ı imzalı paketle imajı yeniden derlemeden güncelleme. Şimdilik yalnız Pi
+# imajında (kalıcı disk); canlı ISO'da güncelleme kapalı (kullanıcı kararı 24.11). Chroot içinde 0210'dan
+# (Çoklu UYAP) SONRA çalışır. Plan: docs/claude-notlar/planlar/cokluuyap-linux-guncelleme.md. Claude, 2026-11-24.
+set -eu
+B=/opt/armonia/guncelle/armonia-guncelle
+[ -f "$B" ] || { echo "HATA: $B yok"; exit 1; }
+[ -f /opt/armonia/cokluuyap/uyap_app ] || { echo "HATA: güncelleme katmanı Çoklu UYAP katmanı ister"; exit 1; }
+chown -R root:root /opt/armonia/guncelle /etc/armonia/guncelle
+chmod 0755 /opt/armonia/guncelle "$B"
+chmod 0644 /etc/armonia/guncelle/ayar /etc/armonia/guncelle/anahtarlar /etc/tmpfiles.d/armonia-guncelle.conf \
+  /etc/polkit-1/rules.d/61-armonia-guncelle.rules /opt/armonia/nft/guncelle_yerel.nft
+
+# Açık anahtarlar: tam bir etkin, bir yedek ve bir sonraki-anahtar taahhüdü (denetçi 24.11 O-1)
+A=/etc/armonia/guncelle/anahtarlar
+[ "$(grep -c '^etkin ' "$A")" = 1 ] && [ "$(grep -c '^yedek ' "$A")" = 1 ] && [ "$(grep -c '^sonraki [0-9a-f]\{64\}$' "$A")" = 1 ] \
+  || { echo "HATA: $A içinde tam bir 'etkin', bir 'yedek' ve bir 'sonraki <sha256>' satırı olmalı"; exit 1; }
+
+# İmaj sürüm kaydı: taban sürüm ve derleme zamanı (eski yayın reddi) buradan okunur
+grep -q '^surum=[0-9]*\.[0-9]*\.[0-9]*$' /opt/armonia/cokluuyap/SURUM \
+  && grep -q '^derleme=[0-9-]*T[0-9:]*Z$' /opt/armonia/cokluuyap/SURUM \
+  || { echo "HATA: /opt/armonia/cokluuyap/SURUM'da surum= veya derleme= yok/bozuk"; exit 1; }
+
+# Ayrı sistem kullanıcıları: indirici (ağa çıkar, kuramaz) ve kurucu (ağsız). Grupsuz, giriş yok.
+for u in armonia-guncelle armonia-guncelle-indir; do
+  id "$u" >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$u"
+done
+# Dizinler imajda da hazır (açılışta tmpfiles yeniden kurar)
+install -d -o root -g root -m 0755 /var/lib/armonia-guncelle
+install -d -o armonia-guncelle -g armonia-guncelle -m 0755 /var/lib/armonia-guncelle/cokluuyap /var/lib/armonia-guncelle/durum
+# setgid: indiricinin dosyaları armonia-guncelle grubunda, kurucu okuyabilir (denetçi 24.11 K-1)
+install -d -o armonia-guncelle-indir -g armonia-guncelle -m 2750 /var/lib/armonia-guncelle/gelen
+chmod 2750 /var/lib/armonia-guncelle/gelen
+[ "$(stat -c '%a %U %G' /var/lib/armonia-guncelle/gelen)" = "2750 armonia-guncelle-indir armonia-guncelle" ] \
+  || { echo "HATA: gelen/ izinleri yanlış: $(stat -c '%a %U %G' /var/lib/armonia-guncelle/gelen)"; exit 1; }
+grep -q '^d /var/lib/armonia-guncelle/gelen *2750 ' /etc/tmpfiles.d/armonia-guncelle.conf || { echo "HATA: tmpfiles gelen/ 2750 değil"; exit 1; }
+
+# Yalnız zamanlayıcı ve açılış budaması etkin; diğer hizmetler etkinleştirilemez ([Install] yok)
+systemctl enable armonia-guncelle-denetle.timer armonia-guncelle-buda.service
+for s in denetle indir kur imaja-don; do
+  grep -q '^\[Install\]' "/etc/systemd/system/armonia-guncelle-$s.service" && { echo "HATA: armonia-guncelle-$s'te [Install] var"; exit 1; }
+done
+
+# Güvenlik duvarı: boş guncelle_yerel zinciri ve output'tan atlama nftables.conf'ta olmalı (denetçi 24.11 K3)
+grep -q 'chain guncelle_yerel' /etc/nftables.conf && grep -q 'jump guncelle_yerel' /etc/nftables.conf \
+  || { echo "HATA: nftables.conf'ta guncelle_yerel zinciri yok"; exit 1; }
+
+# AppArmor: güncellenen ikili de uyap_app profiline bağlanmalı (denetçi 24.11 K1)
+P=/etc/apparmor.d/opt.armonia.cokluuyap.uyap_app
+grep -q 'var/lib/armonia-guncelle/cokluuyap/' "$P" || { echo "HATA: AppArmor profili güncelleme yolunu kapsamıyor"; exit 1; }
+if command -v apparmor_parser >/dev/null; then
+  apparmor_parser -Q -K "$P" || { echo "HATA: AppArmor profili bozuk"; exit 1; }
+fi
+
+# İkili bu mimaride çalışıyor, anahtar/SURUM/ayar okunuyor ve kurulu güncelleme yokken imajı seçiyor (boş çıktı).
+# Çıkış kodu da denetlenir: hata da boş çıktı verir (denetçi 24.11 O-3).
+# oz-denetim canlı denetiminden bağımsızdır (chroot'ta /proc olmayabilir; etkin-sec orada hiçbir şey sınamadan
+# boş dönerdi).
+"$B" oz-denetim || { echo "HATA: armonia-guncelle oz-denetim başarısız"; exit 1; }
+echo "Armonia güncelleme katmanı hazır ($(sed -n 's/^surum=//p' /opt/armonia/guncelle/SURUM 2>/dev/null))"

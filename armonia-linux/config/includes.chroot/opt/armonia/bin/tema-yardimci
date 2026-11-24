@@ -21,6 +21,9 @@ EOT
 for r in "$ARKA" "$ZEMIN" "$YAZI" "$KENAR" "$HAP" "$VURGU" "$VURGU_KOYU" "$VURGU_ZEMIN" "$PASIF" "$VURGU_UZERI"; do
   printf '%s' "$r" | grep -qE '^[0-9A-Fa-f]{6}$' || { echo "bozuk palet: $K" >&2; exit 3; }
 done
+# Ust cubuk logosu: koyu zeminde logonun koyu cizgisi kaybolur; koyu temada krem cizgili surum (logo dosyasinin
+# koyu rozetindeki gibi). Yalniz iki sabit deger (24.11).
+case "$K" in koyu) LOGO=logo-koyu ;; *) LOGO=logo ;; esac
 # Ayni anda tek tema degisikligi; ayarlar.conf'a ayar-yardimci ile ayni kilitle yazilir (denetci 23.11 D1)
 exec 9>/run/armonia-ayar.lock; flock 9
 # Once BES dosyanin hepsi gecici olarak uretilir; biri bile basarisizsa hicbiri degismez ve gecici dosyalar
@@ -32,7 +35,7 @@ uret() {  # sablon hedef
   GECICI="$GECICI $y"
   sed -e "s/@ZEMIN@/$ZEMIN/g" -e "s/@YAZI@/$YAZI/g" -e "s/@KENAR@/$KENAR/g" -e "s/@HAP@/$HAP/g" \
       -e "s/@VURGU_KOYU@/$VURGU_KOYU/g" -e "s/@VURGU_ZEMIN@/$VURGU_ZEMIN/g" -e "s/@VURGU_UZERI@/$VURGU_UZERI/g" \
-      -e "s/@VURGU@/$VURGU/g" -e "s/@PASIF@/$PASIF/g" -e "s/@ARKA@/$ARKA/g" "$T/$1" > "$y"
+      -e "s/@VURGU@/$VURGU/g" -e "s/@PASIF@/$PASIF/g" -e "s/@ARKA@/$ARKA/g" -e "s/@LOGO@/$LOGO/g" "$T/$1" > "$y"
   if grep -q '@[A-Z_]*@' "$y"; then echo "sablonda cozulmemis alan: $1" >&2; exit 3; fi
   chmod 0644 "$y"
   TASI="$TASI $y:$2"

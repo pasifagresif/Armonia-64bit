@@ -231,6 +231,9 @@ if [ "$YAZI" = "1" ]; then
 else
   grep -qE 'opt/armonia/yazi|libwebkit2gtk-4\.1' <<<"$LISTE" && { echo "HATA: YAZI=0 ama imajda Armonia Yazi/WebKitGTK var"; exit 5; }
 fi
+# Guncelleme katmani ISO'ya GIRMEZ: canli (USB) sistemde guncelleme kapali (kullanici karari 24.11); ISO'da Coklu UYAP
+# her zaman imajdaki surumle acilir. Katman yalniz pi_derle.sh'de (GUNCELLE).
+grep -qE 'opt/armonia/guncelle|armonia-guncelle-' <<<"$LISTE" && { echo "HATA: canli ISO'da guncelleme katmani var"; exit 5; }
 # DNS: live-build resolv.conf'u bos birakir; acilista tmpfiles ile resolved stub'ina baglanmali.
 # Icerik denetlenir (guvenlik-denetci D2). Boru + grep -q KULLANMA: pipefail altinda unsquashfs SIGPIPE alir
 # ve dosya varken de hata verir (2026-11-14 ilk deneme).

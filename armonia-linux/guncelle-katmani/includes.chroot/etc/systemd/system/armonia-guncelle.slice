@@ -1,0 +1,4 @@
+# Armonia: guncelleme denetleyici/indirici icin ayri cgroup (nftables 'socket cgroupv2', guncelle_yerel).
+# Claude, 2026-11-24.
+[Unit]
+Description=Armonia guncelleme dilimi

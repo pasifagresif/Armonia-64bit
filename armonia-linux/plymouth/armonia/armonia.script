@@ -26,7 +26,8 @@ logo_y = kart_y + 58;
 logo_s.SetPosition(ox + ekran_w / 2 - logo.GetWidth() / 2, logo_y, 1);
 
 # --- Baslik ve alt baslik
-baslik = Image.Text("Armonia", koyu_r, koyu_g, koyu_b, 1, "Serif Bold 34");
+# 24.11: logo dosyasindaki (Armonia Logo.jpg) kelime isareti; yazi tipine (initramfs'teki fontlara) bagli degil
+baslik = Image("baslik.png");
 baslik_s = Sprite(baslik);
 baslik_y = logo_y + logo.GetHeight() + 18;
 baslik_s.SetPosition(ox + ekran_w / 2 - baslik.GetWidth() / 2, baslik_y, 1);

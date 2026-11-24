@@ -1,0 +1,3 @@
+# Armonia: Coklu UYAP guncelleme ayari (imajin parcasi). imaj_arayuzu: bu imajin kum havuzunun destekledigi duzey.
+# Guncelleme bilgisindeki imaj_arayuzu bundan buyukse (yeni izin, port, yol gerektiren surum) kurulmaz -> yeni imaj.
+imaj_arayuzu=1

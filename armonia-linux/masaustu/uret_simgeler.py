@@ -38,12 +38,23 @@ def kaydet(im, hedef, ad):
 
 
 def logo(hedef):
-    # Geometrik "A": iki bacak + ara çizgi, yeşil, zeminsiz
-    im, d = tuval()
-    w = 3.2
-    cizgi(d, [(4.5, 21), (12, 3), (19.5, 21)], w, YESIL)
-    cizgi(d, [(8.2, 14.5), (15.8, 14.5)], w * 0.8, YESIL)
-    kaydet(im, hedef, "logo")
+    # 24.11: Armonia'nın asıl logosu (kullanıcının "Armonia Logo.jpg" dosyasındaki "A" işareti, zeminden ayrılmış
+    # saydam 512 px: armonia-isaret.png). Geometrik çizim kaldırıldı. Koyu tema için koyu çizgi krem
+    # (logo dosyasının koyu rozetindeki gibi); tema-yardimci koyu temada logo-koyu.png'yi seçer.
+    kaynak = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "armonia-isaret.png")).convert("RGBA")
+    kaynak.resize((128, 128), Image.LANCZOS).save(os.path.join(hedef, "logo.png"))
+    px = kaynak.load()
+    koyu = kaynak.copy()
+    kp = koyu.load()
+    krem = (236, 230, 214)
+    for y in range(koyu.height):
+        for x in range(koyu.width):
+            r, g, b, a = px[x, y]
+            parlaklik = 0.299 * r + 0.587 * g + 0.114 * b
+            w = min(1.0, max(0.0, (140 - parlaklik) / (140 - 37)))
+            kp[x, y] = (round(w * krem[0] + (1 - w) * r), round(w * krem[1] + (1 - w) * g),
+                        round(w * krem[2] + (1 - w) * b), a)
+    koyu.resize((128, 128), Image.LANCZOS).save(os.path.join(hedef, "logo-koyu.png"))
 
 
 def uyap(hedef):

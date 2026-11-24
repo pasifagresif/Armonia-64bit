@@ -126,9 +126,22 @@ if [ "$YAZI" = "1" ]; then
   YPAKET=$(grep -hv '^\s*#' "$KAYNAK/yazi-katmani/package-lists/yazi.list.chroot" | tr -s ' \t\r' '\n' | grep -v '^$' | tr '\n' ' ')
   chroot "$K" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends $YPAKET
 fi
+# Coklu UYAP guncelleme katmani (24.11): imzali paketle imaji yeniden derlemeden guncelleme; yalniz Pi (kalici disk).
+# Yayinci acik anahtarlari (guncelle-katmani/anahtarlar) yoksa katman eklenemez: GUNCELLE kendiliginden 0 olur ve
+# bu ACIKCA yazilir. Plan: docs/claude-notlar/planlar/cokluuyap-linux-guncelleme.md.
+if [ -z "${GUNCELLE:-}" ]; then
+  if [ "$COKLUUYAP" = "1" ] && [ -s "$KAYNAK/guncelle-katmani/anahtarlar" ]; then GUNCELLE=1; else GUNCELLE=0
+    echo "UYARI: Coklu UYAP guncelleme katmani EKLENMIYOR (anahtar dosyasi yok ya da COKLUUYAP=0); Coklu UYAP yalniz imajla guncellenir"
+  fi
+fi
+if [ "$GUNCELLE" = "1" ]; then
+  [ "$COKLUUYAP" = "1" ] || { echo "HATA: GUNCELLE=1 Coklu UYAP katmani ister"; exit 1; }
+  bash "$KAYNAK/guncelle_hazirla.sh" "$K" aarch64 "$K/tmp/kanca-guncelle"
+fi
 # Windows'tan gelmis olabilecek CR satir sonlari
 find "$K/opt/armonia" "$K/etc/armonia" "$K/etc/systemd/system" -type f \
-  ! -path "$K/opt/armonia/uygulamalar/*" ! -path "$K/opt/armonia/cokluuyap/*" ! -path "$K/opt/armonia/yazi/*" -exec sed -i 's/\r$//' {} +
+  ! -path "$K/opt/armonia/uygulamalar/*" ! -path "$K/opt/armonia/cokluuyap/*" ! -path "$K/opt/armonia/yazi/*" \
+  ! -path "$K/opt/armonia/guncelle/*" -exec sed -i 's/\r$//' {} +
 chmod 0755 "$K"/opt/armonia/bin/*.sh "$K/opt/armonia/bin/ayar-yardimci" "$K/opt/armonia/bin/tema-yardimci" "$K/usr/local/bin/xdg-open"
 # 23.11 (G1): deneme isareti KALDIRILDI. Pi imaji kalici (diske yazar); kilit ve parola canli sistem gibi kapali
 # kalamaz. Ilk acilista LUKS2 + tek parola (disk + 'armonia' kullanicisi) belirlenir.
@@ -186,6 +199,10 @@ fi
 if [ "$YAZI" = "1" ]; then
   chroot "$K" /bin/sh /tmp/kanca-yazi/0220-armonia-yazi.hook.chroot
   rm -rf "$K/tmp/kanca-yazi"
+fi
+if [ "$GUNCELLE" = "1" ]; then
+  chroot "$K" /bin/sh /tmp/kanca-guncelle/0230-armonia-guncelle.hook.chroot
+  rm -rf "$K/tmp/kanca-guncelle"
 fi
 # G6 (23.11): USBGuard Pi'de yeniden ACIK. 20.11'de kapatilma nedeni (kok USB bellegi acilista bekletip sistemi
 # dusurmesi) armonia-usb-kok.service ile cozuldu: usbguard'dan once kok disk icin dar izin kurali (ozet + kimlik +

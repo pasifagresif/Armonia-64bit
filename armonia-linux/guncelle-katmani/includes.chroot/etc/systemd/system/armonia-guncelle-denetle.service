@@ -1,0 +1,58 @@
+# Armonia: Coklu UYAP guncelleme denetimi (gunde bir; zamanlayici). Yalniz imzali bilgiyi indirir ve dogrular,
+# sonucu /run/armonia-guncelle/durum.json'a yazar. Paket indirmez, kurmaz. Canli (USB) sistemde calismaz
+# (kullanici karari 24.11). Plan: docs/claude-notlar/planlar/cokluuyap-linux-guncelleme.md. Claude, 2026-11-24.
+[Unit]
+Description=Armonia Coklu UYAP guncelleme denetimi
+After=network-online.target nftables.service
+Wants=network-online.target
+PartOf=nftables.service
+ConditionKernelCommandLine=!boot=live
+ConditionPathExists=/etc/armonia/guncelle/anahtarlar
+
+[Service]
+Type=oneshot
+User=armonia-guncelle-indir
+Group=armonia-guncelle-indir
+Slice=armonia-guncelle.slice
+ExecStart=/opt/armonia/guncelle/armonia-guncelle denetle
+ReadWritePaths=/run/armonia-guncelle
+TimeoutStartSec=5min
+MemoryMax=256M
+# Ag: yalniz DNS (resolved stub) ve disariya 443; yerel ag, 127.0.0.0/8 (5975 e-imza, 8800 Coklu UYAP) kapali.
+# Iki katman: birimin IP suzgeci (dilime bagli degil) + nft guncelle_yerel (yalniz 443; denetci 24.11 K3).
+# Allow, Deny karsisinda onceliklidir: localhost icinde yalniz 127.0.0.53.
+IPAddressAllow=127.0.0.53/32
+IPAddressDeny=localhost link-local multicast 255.255.255.255/32 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ExecStartPre=+/usr/sbin/nft -f /opt/armonia/nft/guncelle_yerel.nft
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# /proc/cmdline okunur (canli sistem denetimi); baska surecler gorunmez
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+LimitCORE=0
+UMask=0022
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+InaccessiblePaths=-/run/armonia -/run/armonia-imza -/run/pcscd -/run/postgresql -/run/dbus -/var/lib/armonia -/var/lib/armonia-imza -/media -/mnt
+StandardOutput=journal
+StandardError=journal

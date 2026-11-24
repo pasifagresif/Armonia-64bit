@@ -1,0 +1,20 @@
+// Armonia guncelleme: masaustu kullanicisi ('armonia', yerel ve etkin oturum) YALNIZ sunlari baslatabilir:
+//   armonia-guncelle-denetle.service   (simdi denetle; yalniz imzali bilgiyi indirir)    -> parolasiz
+//   armonia-guncelle-imaja-don.service (bu acilis icin imajdaki surum; kalici degil)    -> parolasiz
+//   armonia-guncelle-indir.service     (indir + ardindan agsiz kurulum)                 -> kullanici parolasi
+// Kurucu birim (armonia-guncelle-kur) dogrudan baslatilamaz; durdurma/etkinlestirme vb. varsayilana (yonetici)
+// duser. Claude, 2026-11-24 (denetci 24.11 O7: systemd yalniz manage-units eylemini sorar).
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units" || subject.user != "armonia" ||
+        !subject.local || !subject.active || action.lookup("verb") != "start") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var u = action.lookup("unit");
+    if (u == "armonia-guncelle-denetle.service" || u == "armonia-guncelle-imaja-don.service") {
+        return polkit.Result.YES;
+    }
+    if (u == "armonia-guncelle-indir.service") {
+        return polkit.Result.AUTH_SELF_KEEP;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

@@ -1,0 +1,12 @@
+# Armonia: guncelleme denetimi gunde bir, acilistan 10 dk sonra; sunucuya yuk binmesin diye rastgele gecikme.
+[Unit]
+Description=Armonia Coklu UYAP guncelleme denetimi (gunluk)
+ConditionKernelCommandLine=!boot=live
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1d
+RandomizedDelaySec=2h
+
+[Install]
+WantedBy=timers.target

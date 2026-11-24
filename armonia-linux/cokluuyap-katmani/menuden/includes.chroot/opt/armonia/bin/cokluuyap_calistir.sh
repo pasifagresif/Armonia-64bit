@@ -16,6 +16,22 @@ if [ -n "$TEMA" ]; then
   rm -f "$HOME/CokluUyap/tema.txt"
   printf '%s' "$TEMA" > "$HOME/CokluUyap/tema.txt"
 fi
+# Hangi surum (24.11, guncelleme katmani; yalniz Pi): armonia-guncelle etkin-sec, kurulu imzali guncellemeyi bu kum
+# havuzunun ICINDE (root degil) dogrular (imza -> agac ozeti -> her dosya) ve dizinini yazar; bos, hata ya da
+# beklenmeyen cikti -> imajdaki surum. Dizin bir kez cozulur ve yalniz o somut dizin calistirilir (denetci 24.11
+# O2/O3). Katman yoksa (ISO) ikili de yoktur.
+U=/opt/armonia/cokluuyap
+G=/opt/armonia/guncelle/armonia-guncelle
+if [ -x "$G" ]; then
+  D=$("$G" etkin-sec) || D=""
+  case "$D" in
+    "") ;;
+    /var/lib/armonia-guncelle/cokluuyap/[0-9]*.[0-9]*.[0-9]*)
+      case "$D" in *[!0-9a-z/.-]*|*..*) echo "cokluuyap: etkin-sec beklenmeyen yol, imaj kullaniliyor" ;; *) U="$D" ;; esac ;;
+    *) echo "cokluuyap: etkin-sec beklenmeyen yol, imaj kullaniliyor" ;;
+  esac
+fi
+echo "cokluuyap: $U"
 # stdin bos: uygulama konsoldan okumaya kalkarsa sonsuza dek beklemesin (14.11 sertifika secimi hatasi)
 # Oturum kapaninca oturum.sh birimi durdurur (yeniden deneme de iptal olur; denetci 23.11 O2)
-exec /opt/armonia/cokluuyap/uyap_app </dev/null
+exec "$U/uyap_app" </dev/null

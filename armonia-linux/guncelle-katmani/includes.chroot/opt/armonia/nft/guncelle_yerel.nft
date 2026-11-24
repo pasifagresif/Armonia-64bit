@@ -1,0 +1,13 @@
+# Armonia guncelleme dilimi (armonia-guncelle.slice): yalniz resolved stub'ina DNS ve disariya TCP 443.
+# Yerel adresler (127.0.0.0/8: 5975 e-imza, 8800 Coklu UYAP vekili), yerel ag ve diger kapilar ret.
+# nftables.conf'taki bos guncelle_yerel zincirini doldurur; birim baslarken yuklenir (cgroup yolu ancak dilim
+# varken cozulur). Ana makine adina gore suzulemez: sunucu kisiti programda (sabit kok, yonlendirme yok).
+# Claude, 2026-11-24 (denetci 24.11 K3).
+flush chain inet filter guncelle_yerel
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" ct state established,related accept
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" ip daddr 127.0.0.53 meta l4proto { tcp, udp } th dport 53 accept
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" fib daddr type local reject
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 224.0.0.0/4, 255.255.255.255 } reject
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" ip6 daddr { fc00::/7, fe80::/10, ff00::/8 } reject
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" tcp dport 443 accept
+add rule inet filter guncelle_yerel socket cgroupv2 level 2 "armonia.slice/armonia-guncelle.slice" reject

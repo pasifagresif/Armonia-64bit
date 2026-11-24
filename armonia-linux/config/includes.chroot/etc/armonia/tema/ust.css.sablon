@@ -3,7 +3,7 @@
 window#waybar { background: alpha(#@ZEMIN@, 0.96); color: #@YAZI@; border: 1px solid #@KENAR@; border-radius: 14px; }
 #custom-logo {
   font-size: 17px; font-weight: bold; color: #@YAZI@;
-  background-image: url("/usr/share/armonia/simge/logo.png"); background-repeat: no-repeat; background-size: 24px 24px;
+  background-image: url("/usr/share/armonia/simge/@LOGO@.png"); background-repeat: no-repeat; background-size: 24px 24px;
   background-position: 10px center; padding: 0 12px 0 40px;
 }
 #custom-kip.canli { color: #@VURGU_UZERI@; background: #@VURGU@; border-radius: 9px; margin: 7px 0; padding: 0 10px; }

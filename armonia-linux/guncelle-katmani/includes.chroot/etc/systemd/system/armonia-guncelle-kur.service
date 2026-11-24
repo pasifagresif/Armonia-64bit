@@ -1,0 +1,51 @@
+# Armonia: indirilen paketi dogrulayip kurar (indirici basariyla bitince OnSuccess=). AGSIZ; kullanici
+# armonia-guncelle (indirici degil). Paketi bir kez acar, kendi kopyasinda imza + ozet + MANIFEST denetler,
+# cokluuyap/<surum>/ icine acar, 'etkin' dosyasini atomik degistirir. Claude, 2026-11-24.
+[Unit]
+Description=Armonia Coklu UYAP guncelleme kurulumu
+ConditionKernelCommandLine=!boot=live
+ConditionPathExists=/etc/armonia/guncelle/anahtarlar
+
+[Service]
+Type=oneshot
+User=armonia-guncelle
+Group=armonia-guncelle
+# İndirici ile aynı anda çalışmaz: gelen/.kilit üzerinde flock (Conflicts= iki yönlüydü; denetçi 24.11 D-3)
+ExecStart=/opt/armonia/guncelle/armonia-guncelle kur-gelen
+ReadWritePaths=/var/lib/armonia-guncelle/cokluuyap /var/lib/armonia-guncelle/durum
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+TimeoutStartSec=10min
+MemoryMax=512M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# /proc/cmdline okunur (canli sistem denetimi); baska surecler gorunmez
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+LimitCORE=0
+UMask=0022
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+InaccessiblePaths=-/run/armonia -/run/armonia-imza -/run/pcscd -/run/postgresql -/run/dbus -/var/lib/armonia -/var/lib/armonia-imza -/media -/mnt
+StandardOutput=journal
+StandardError=journal

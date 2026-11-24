@@ -1,0 +1,50 @@
+# Armonia: bu acilis boyunca Coklu UYAP imajdaki surumle acilir (guncellenmis surum baslatma sinirini asip
+# cokerse OnFailure=, ya da kullanici Ayarlar'dan isterse). KALICI DEGIL ve onceki guncellemeye donmez: oturumdaki
+# bir surec uygulamayi oldurerek eski, acikli bir guncellemeye indiremesin (denetci 24.11 K2). Claude, 2026-11-24.
+[Unit]
+Description=Armonia Coklu UYAP bu acilista imajdaki surum
+
+[Service]
+Type=oneshot
+User=armonia-guncelle
+Group=armonia-guncelle
+ExecStart=/opt/armonia/guncelle/armonia-guncelle imaja-don
+# Başlatma sınırına takılmış (failed) Çoklu UYAP hemen yeniden açılabilsin; yoksa menüden 5 dk açılmazdı
+# (denetçi 24.11 O-2). Yalnız bu birim için, root olarak.
+ExecStartPost=+/usr/bin/systemctl reset-failed armonia-cokluuyap.service
+ReadWritePaths=/run/armonia-guncelle-don
+PrivateNetwork=yes
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=64M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# /proc/cmdline okunur (canli sistem denetimi); baska surecler gorunmez
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+LimitCORE=0
+UMask=0022
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+InaccessiblePaths=-/run/armonia -/run/armonia-imza -/run/pcscd -/run/postgresql -/run/dbus -/var/lib/armonia -/var/lib/armonia-imza -/media -/mnt
+StandardOutput=journal
+StandardError=journal
