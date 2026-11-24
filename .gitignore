@@ -14,6 +14,10 @@ uyap_profil/
 **/static_cache/
 UyapMasa/modules/logger_data/
 
+# ── Armonia Linux derleme artefaktları (lb build çıktısı, makineye özel) ──
+armonia-linux/build.log
+**/build.log
+
 # ── Canlı UYAP oturum çerezleri (= bearer kimlik bilgisi; #1) ──
 uyap_session_cookies.json
 **/uyap_session_cookies.json

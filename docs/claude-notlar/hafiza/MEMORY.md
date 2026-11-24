@@ -23,3 +23,5 @@
 - [Tepsi sade panel](tepsi-sade-panel.md) — programı şişirme; ayarlar web'e; tepsi: giriş → sade panel, PIN tepside
 - [Armonia herkes için](armonia-herkes-icin.md) — 19.11 YÖN DEĞİŞİKLİĞİ: kiosk yok, açılışta Rust yok; temel hukukçu masaüstü, Çoklu UYAP en son Ayarlar'dan
 - [E-imza Pi'de (arm64)](eimza-arm64-pi.md) — AKİS sürücüsüz APDU ile imza çalıştı; JVM seçenekleri, pcscd yeniden başlama ve kart donma tuzakları
+- [Armonia Linux 2 hata + derleme planı](armonia-linux-2-hata-derleme-plani.md) — e-imza port hex'i, Armonia Yazı WebKit sandbox düzeltmesi; çoklu bilgisayar senkronizasyon notu
+- [Dosya yöneticisi + Windows genelleştirme planı](dosya-yoneticisi-ve-windows-genellestirme-plani.md) — Thunar→egui Armonia Dosyalar, İcramatik→genel çoklu Windows uygulama; onaylandı, kod yazılmadı

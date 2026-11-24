@@ -62,7 +62,7 @@ fi
 # non-free-firmware (23.11): Wi-Fi / ekran karti yazilimlari + mikrokod; imajdaki apt kaynaklarina da girer
 # (surucu.sh sonradan takilan aygit icin firmware-* kurabilsin). --firmware-chroot false: live-build butun
 # firmware paketlerini KOYMASIN, yalniz 0040-armonia-donanim-yazilimi kancasindaki liste girsin.
-ACILIS="boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1')$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1')$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1')"
+ACILIS="boot=live quiet splash loglevel=3 toram $EK_PARAM$( [ "$TEST" = "1" ] && echo ' armonia.test_kasa=1' || true)$( [ "${OLCUM_TARAYICI:-0}" = "1" ] && echo ' armonia.olcum_tarayici=1' || true)$( { [ "$TEST" = "1" ] || [ "${OLCUM_TARAYICI:-0}" = "1" ] || [ "${OLCUM:-0}" = "1" ]; } && echo ' armonia.olcum=1' || true)"
 # UEFI (23.11): BIOS'ta syslinux, UEFI'de GRUB. --uefi-secure-boot auto: Debian'in imzali shim + GRUB'u varsa
 # Secure Boot acik makinede de acilir (imzali Debian cekirdegi). Derleme sonunda denetlenir.
 lb config --distribution trixie --archive-areas "main non-free-firmware" --debian-installer none \

@@ -23,6 +23,7 @@ R="/run/user/$(id -u)"
 D=/home/armonia/.local/share/armonia-yazi
 # HOME gerçek ev dizini kalır (dosya penceresi Belgeler/İndirilenler'i göstersin; ev dizininin kendisi salt okunur
 # boş tmpfs). Yazılan her şey (WebKit önbelleği, GTK son kullanılanlar) veri klasörüne.
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 export XDG_RUNTIME_DIR="$R" WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland HOME=/home/armonia \
   XDG_CONFIG_HOME="$D/config" XDG_CACHE_HOME="$D/cache" XDG_DATA_HOME="$D/data" TMPDIR="$D/tmp"
 unset DISPLAY

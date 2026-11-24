@@ -71,8 +71,8 @@ if grep -q 'armonia.olcum_tarayici=1' /proc/cmdline; then
   sleep 2
 fi
 echo "--- e-imza (Adalet E-imza)"
-for i in $(seq 1 30); do grep -q ':175F ' /proc/net/tcp /proc/net/tcp6 2>/dev/null && break; sleep 1; done
-echo "servis: $(systemctl is-active armonia-eimza.service 2>&1)  pcscd.socket: $(systemctl is-active pcscd.socket 2>&1)  5975 dinleyen: $(awk '$4=="0A"' /proc/net/tcp /proc/net/tcp6 | grep -c ':175F ')"
+for i in $(seq 1 30); do grep -q ':1757 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null && break; sleep 1; done
+echo "servis: $(systemctl is-active armonia-eimza.service 2>&1)  pcscd.socket: $(systemctl is-active pcscd.socket 2>&1)  5975 dinleyen: $(awk '$4=="0A"' /proc/net/tcp /proc/net/tcp6 | grep -c ':1757 ')"
 # Java [::ffff:127.0.0.1]:5975 (tcp6) dinler; yalniz tcp okumak 0 gosteriyordu. Xvfb: soyut (@) X soketi OLMAMALI
 echo "5975 adresi: $(ss -ltnH 'sport = :5975' 2>&1 | awk '{print $4}' | tr '\n' ' ')  Xvfb: $(pgrep -c -u eimza Xvfb)  Xvfb soyut X99 (0 olmali): $(ss -xlH | grep -c '@/tmp/.X11-unix/X99')  TCP 6000+ (0 olmali): $(ss -ltnH | grep -cE ':60[0-9][0-9] ')"
 # guvenlik-denetci O-X1: labwc Depends xwayland -> masaustune X kapisi (X0) acik mi? Kim dinliyor, eimza baglanabiliyor mu

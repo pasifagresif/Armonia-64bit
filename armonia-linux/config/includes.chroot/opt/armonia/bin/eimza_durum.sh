@@ -3,7 +3,7 @@
 # ve 5975 dinleniyor mu. Claude, 2026-11-19.
 if ! systemctl -q is-active armonia-eimza.service; then
   echo '{"text":"E-İmza: Kapalı","class":"kapali","tooltip":"Adalet E-imza istemcisi çalışmıyor"}'
-elif grep -q ':175F ' /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
+elif grep -q ':1757 ' /proc/net/tcp /proc/net/tcp6 2>/dev/null; then
   echo '{"text":"E-İmza: Hazır","class":"hazir","tooltip":"Adalet E-imza hazır (127.0.0.1:5975)"}'
 else
   echo '{"text":"E-İmza: Açılıyor","class":"bekliyor","tooltip":"Adalet E-imza açılıyor"}'

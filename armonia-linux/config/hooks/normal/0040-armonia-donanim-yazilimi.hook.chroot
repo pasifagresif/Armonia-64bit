@@ -11,6 +11,7 @@ firmware-amd-graphics firmware-sof-signed intel-microcode amd64-microcode"
 # Istege bagli (paket adi Debian surumune gore degisebilir): yeni Intel ekran karti, MediaTek Wi-Fi
 ISTEGE="firmware-intel-graphics firmware-mediatek"
 export DEBIAN_FRONTEND=noninteractive
+export INITRD=No
 apt-get install -y -q --no-install-recommends $ZORUNLU
 for p in $ISTEGE; do
   apt-get install -y -q --no-install-recommends "$p" || echo "UYARI: $p kurulamadi (bu Debian surumunde yok olabilir)"
