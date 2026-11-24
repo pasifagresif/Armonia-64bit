@@ -124,3 +124,73 @@ export function onekleriYenile(view: EditorView, asil: Belge) {
   });
   if (tr.docChanged) view.dispatch(tr.setMeta("addToHistory", false));
 }
+
+/** Ortak sekme hizası: etiket satırlarının (DAVACI ⇥ : …, VEKİLİ ⇥ : …) ilk sekmesini tek durağa hizalar.
+ * UYAP Doküman Editörü'nde cetvelden durak koymakla aynı sonuç: paragrafa `TabSet="N.0:0:0"` yazılır (tam sayı pt,
+ * sol hizalı), belgenin geri kalanına ve varsayılan 72 pt duraklarına dokunulmaz. Seçim varsa seçimdeki, yoksa
+ * imlecin paragrafı ve ona bitişik sekmeli paragraflar. Durak = en uzun etiketin bittiği yer + 6 pt. Paragraf başı
+ * sekmesi (girinti) etiket sayılmaz. Etiketten sonraki art arda fazla sekmeler (UYAP'ta kısa etiket için iki kez Tab)
+ * tek durağa gelsin diye silinir. Dönüş: kullanıcıya gösterilecek ileti. */
+export function sekmeleriHizala(view: EditorView): { ileti: string; tamam: boolean } {
+  const { state } = view;
+  const tip = sema.nodes.sekme;
+  const paragraflar: { pos: number; n: PMNode; ust: PMNode }[] = [];
+  state.doc.descendants((n, pos, ust) => {
+    if (n.type === sema.nodes.paragraph) {
+      paragraflar.push({ pos, n, ust: ust! });
+      return false;
+    }
+    return true;
+  });
+  const sekmeli = (n: PMNode) => {
+    let var_ = false;
+    n.forEach((c) => { if (c.type === tip) var_ = true; });
+    return var_;
+  };
+  const { from, to, empty } = state.selection;
+  let secilen = paragraflar.filter((p) => p.pos + p.n.nodeSize > from && p.pos <= to);
+  if (empty && secilen.length === 1) {
+    const i = paragraflar.indexOf(secilen[0]);
+    if (sekmeli(paragraflar[i].n)) {
+      let a = i, b = i;
+      while (a > 0 && paragraflar[a - 1].ust === paragraflar[i].ust && sekmeli(paragraflar[a - 1].n)) a--;
+      while (b < paragraflar.length - 1 && paragraflar[b + 1].ust === paragraflar[i].ust && sekmeli(paragraflar[b + 1].n)) b++;
+      secilen = paragraflar.slice(a, b + 1);
+    }
+  }
+  // Ölç: ilk sekmenin başladığı yer (pt, paragrafın sol girintisine göre; sayfa.ts ve udf_pdf.rs ile aynı taban)
+  const olculen: { pos: number; n: PMNode; x: number }[] = [];
+  for (const p of secilen) {
+    const dom = view.nodeDOM(p.pos) as HTMLElement | null;
+    const s = dom?.querySelector<HTMLElement>(".sekme");
+    if (!dom || !s) continue;
+    const olcek = dom.getBoundingClientRect().width / (dom.offsetWidth || 1) || 1;
+    const sol = dom.getBoundingClientRect().left + parseFloat(getComputedStyle(dom).paddingLeft) * olcek;
+    const x = (s.getBoundingClientRect().left - sol) / olcek / (96 / 72);
+    if (x < 1) continue; // paragraf başı sekmesi: girinti, etiket değil
+    olculen.push({ pos: p.pos, n: p.n, x });
+  }
+  if (!olculen.length) return { ileti: "Hizalanacak satır yok: imleci etiket ⇥ değer biçimindeki (Tab'lı) satırlara koyun ya da onları seçin.", tamam: false };
+  const durak = Math.ceil(Math.max(...olculen.map((o) => o.x)) + 6);
+  const tr = state.tr;
+  // Sondan başa: silinen fazla sekmeler önceki konumları kaydırmasın
+  for (const o of [...olculen].reverse()) {
+    const ilk: number[] = [];
+    let ilkBulundu = false, bitti = false;
+    o.n.forEach((c, ofs) => {
+      if (bitti) return;
+      if (c.type === tip) {
+        if (ilkBulundu) ilk.push(o.pos + 1 + ofs);
+        ilkBulundu = true;
+      } else if (ilkBulundu) bitti = true;
+    });
+    for (const p of ilk.reverse()) tr.delete(p, p + 1);
+    tr.setNodeMarkup(o.pos, undefined, {
+      ...o.n.attrs,
+      sekmeler: [{ konum: durak, hiza: 0 }],
+      oz: ozAyarla(o.n.attrs.oz as Ozellikler, "TabSet", `${durak}.0:0:0`),
+    });
+  }
+  view.dispatch(tr.scrollIntoView());
+  return { ileti: `${olculen.length} satır ortak hizaya alındı (sekme durağı ${durak} pt).`, tamam: true };
+}

@@ -27,6 +27,10 @@ install -d -m 0755 "$HEDEF/opt/armonia/cokluuyap/uyap_core"
 install -m 0755 "$D/uyap_app" "$HEDEF/opt/armonia/cokluuyap/uyap_app"
 cp -r "$D/webapp" "$HEDEF/opt/armonia/cokluuyap/webapp"
 cp -r "$D/uyap_core/enjekte" "$HEDEF/opt/armonia/cokluuyap/uyap_core/enjekte"
+# Armonia Yazi (Coklu UYAP penceresindeki editor: buro belgeleri, onaya sun, dosyaya gonder; 24.11). Yoksa uyap_app
+# "Armonia Yazi bu kurulumda yok" der: imaj derlemesi bunu sessizce atlamasin.
+[ -f "$D/uyap_core/yazi/index.html" ] || { echo "HATA: $D/uyap_core/yazi yok (Coklu UYAP deposundaki derle_uyap.sh ile derleyin)"; exit 7; }
+cp -r "$D/uyap_core/yazi" "$HEDEF/opt/armonia/cokluuyap/uyap_core/yazi"
 [ -f "$D/SURUM" ] && install -m 0644 "$D/SURUM" "$HEDEF/opt/armonia/cokluuyap/SURUM"
 cp -a "$KAYNAK/cokluuyap-katmani/menuden/includes.chroot/." "$HEDEF/"
 install -d "$KANCA"

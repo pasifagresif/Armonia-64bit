@@ -2,7 +2,7 @@
 // (kalın, italik, altı çizili, hizalama) düzenler, UDF olarak kaydeder. Üst/alt bilgi ve tablolar şimdilik salt
 // okunur (korunur). Sayfalara bölme sonraki adım. Claude, 2026-11-23.
 
-import { baseKeymap, chainCommands, setBlockType, toggleMark } from "prosemirror-commands";
+import { baseKeymap, chainCommands, setBlockType, splitBlockAs, toggleMark } from "prosemirror-commands";
 import { history, redo, undo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { EditorState, type Command } from "prosemirror-state";
@@ -10,7 +10,7 @@ import { EditorView } from "prosemirror-view";
 
 import { bloklariCiz } from "./cizim";
 import { belgeDugumu, belgeyeCevir } from "./donustur";
-import { BOYUTLAR, SATIR_ARALIKLARI, YAZI_TIPLERI, etkinYazi, girinti, liste, onekleriYenile, satirAraligi, yaziDegistir } from "./komutlar";
+import { BOYUTLAR, SATIR_ARALIKLARI, YAZI_TIPLERI, etkinYazi, girinti, liste, onekleriYenile, satirAraligi, sekmeleriHizala, yaziDegistir } from "./komutlar";
 import { bosBelgeOlustur } from "./bos_belge";
 import { imzaPenceresiAc } from "./imza_penceresi";
 import { b64Coz, b64Kodla, cagir, masaustu, type ImzaBilgisi, type MasaustuDosya, type MasaustuKayit } from "./masaustu";
@@ -41,6 +41,8 @@ let acik: Acik | null = null;
 let gorunum: EditorView | null = null;
 let degisti = false;
 let onekZamani = 0;
+/** Biçimsiz metnin yazısı (belgenin hvl-default stili): seçiciler biçim işareti yoksa bunu gösterir. */
+let varsayilanYazi = { aile: "Times New Roman", boyut: 12 };
 
 const $ = <T extends HTMLElement>(s: string) => document.querySelector(s) as T;
 
@@ -78,6 +80,18 @@ const sekmeEkle: Command = (state, dispatch) => {
   }
   return true;
 };
+
+/** Enter (UYAP'ta olduğu gibi): yeni paragraf öncekinin özelliklerini (sekme durakları, hizalama, girinti, aralık;
+ * UDF'e de yazılsın diye ham `oz` ile) ve imleçteki yazı biçimini alır. Varsayılan `splitBlock` paragrafı varsayılan
+ * özelliklerle açıyordu: sekme durakları gidince Tab her 72 pt'ye düşüyor, alt alta hizalar kayıyordu. */
+const paragrafBol: Command = (state, dispatch) =>
+  splitBlockAs((n) => (n.type === sema.nodes.paragraph
+    ? { type: n.type, attrs: { ...n.attrs, satirSonuOz: null, onek: null } }
+    : null))(state, dispatch && ((tr) => {
+    const isaretler = state.storedMarks || (state.selection.$to.parentOffset && state.selection.$from.marks());
+    if (isaretler) tr.ensureMarks(isaretler);
+    dispatch(tr);
+  }));
 
 const kalin = toggleMark(sema.marks.kalin);
 const egik = toggleMark(sema.marks.egik);
@@ -157,8 +171,9 @@ function sayfayiKur(a: Acilis) {
   // Biçimsiz metin (yeni paragraf, yeni tablo hücresi) UDF'te belgenin varsayılan stilini alır (hvl-default;
   // stil.rs ile aynı varsayılanlar: Times New Roman 12): ekranda da öyle görünsün
   const vs = a.belge.stiller.find((st) => st.ad === "hvl-default")?.oz ?? [];
-  govde.style.fontFamily = cssAilesi(ozAl(vs, "family") || "Times New Roman");
-  govde.style.fontSize = `${Number(ozAl(vs, "size")) > 0 ? Number(ozAl(vs, "size")) : 12}pt`;
+  varsayilanYazi = { aile: ozAl(vs, "family") || "Times New Roman", boyut: Number(ozAl(vs, "size")) > 0 ? Number(ozAl(vs, "size")) : 12 };
+  govde.style.fontFamily = cssAilesi(varsayilanYazi.aile);
+  govde.style.fontSize = `${varsayilanYazi.boyut}pt`;
 
   // Sayfa sayısı değişince katman: kâğıtlar, üst/alt bilgi, sayfa numarası
   const katmaniCiz = (n: number) => {
@@ -227,6 +242,7 @@ function sayfayiKur(a: Acilis) {
           "Mod-s": () => { kaydet(); return true; },
           "Mod-n": () => { yeniBelge(); return true; },
           "Mod-o": () => { acmaIste(); return true; },
+          "Enter": paragrafBol,
           "Tab": chainCommands(hucreGec(1), sekmeEkle),
           "Shift-Tab": hucreGec(-1),
           "Mod-l": hizala("Sol"), "Mod-e": hizala("Orta"), "Mod-r": hizala("Sag"), "Mod-j": hizala("IkiYana"),
@@ -504,7 +520,15 @@ const DUGMELER: (Dugme | "|")[] = [
   { ad: "⇥", ipucu: "Girintiyi artır", komut: girinti(1) },
   { ad: "Madde", ipucu: "Madde imli liste", komut: liste("madde"), liste: "Bulleted", simge: SIMGE.madde },
   { ad: "Numara", ipucu: "Numaralı liste", komut: liste("numara"), liste: "Numbered", simge: SIMGE.numara },
+  { ad: "⇥:", ipucu: "Tab'lı satırları ortak hizaya al (DAVACI ⇥ : …): imlecin bulunduğu satır bloğu ya da seçim", eylem: () => ortakHiza() },
 ];
+
+function ortakHiza() {
+  if (!gorunum || !gorunum.editable) return;
+  const s = sekmeleriHizala(gorunum);
+  bildir(s.ileti, s.tamam ? "bilgi" : "uyari");
+  gorunum.focus();
+}
 
 // Seçiciler: yazı tipi, boyut, renk, satır aralığı
 const secici = {
@@ -652,11 +676,11 @@ function cubuguGuncelle() {
   }
   if (st) {
     const y = etkinYazi(st);
-    if (y) {
-      seciciDeger(secici.aile, y.aile);
-      seciciDeger(secici.boyut, String(y.boyut));
-      secici.renk.value = renkHex(y.renk);
-    }
+    // Biçim işareti yoksa metin belgenin varsayılan yazısıyla çizilir (sayfayiKur): seçiciler de onu göstersin
+    // (önceden eski değerde / listenin ilk seçeneğinde, ör. "8", kalıyordu)
+    seciciDeger(secici.aile, y ? y.aile : varsayilanYazi.aile);
+    seciciDeger(secici.boyut, String(y ? y.boyut : varsayilanYazi.boyut));
+    secici.renk.value = y ? renkHex(y.renk) : "#000000";
     // Belgedeki değer seçeneklerden birine çok yakınsa (UYAP 0.14999998 yazar) onu göster
     const sa = st.selection.$from.parent.attrs.satirAraligi as number;
     const yakin = SATIR_ARALIKLARI.find(([, d]) => Math.abs(d - sa) < 0.005);

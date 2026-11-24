@@ -63,6 +63,8 @@ fi
 rm -rf "$OUT"; mkdir -p "$OUT/uyap_core"
 install -m 0755 target/release/uyap_app "$OUT/uyap_app"
 cp -r "$SRC/uyap_core/enjekte" "$OUT/uyap_core/enjekte"
+# Armonia Yazı editörü (derlenmiş arayüz; ruyap/araclar/yazi_al.py ile alınır)
+[ -f "$SRC/uyap_core/yazi/index.html" ] && cp -r "$SRC/uyap_core/yazi" "$OUT/uyap_core/yazi"
 cp -r "$SRC/webapp" "$OUT/webapp"
 cat >"$OUT/SURUM" <<EOT
 surum=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
