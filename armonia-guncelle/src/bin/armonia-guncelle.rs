@@ -13,6 +13,7 @@
 //!   kur-gelen    (armonia-guncelle-kur.service; ağsız)       imaja-don (bu açılış için imajdaki sürüm)
 //!   buda         (açılışta; etkin dışındaki sürümleri siler)   oz-denetim (imaj kancası)
 //!   etkin-sec    (cokluuyap_calistir.sh; kum havuzu içinde)  kur <json> <sig> <paket>   iptal-ekle <bildirim> <sig>
+//!   durum        (Ayarlar; JSON, imzayı yeniden doğrular)    cubuk  (üst çubuk göstergesi; waybar JSON)
 
 use armonia_guncelle::anahtar::{self, Anahtarlar};
 use armonia_guncelle::bilgi::{self, Baglam, Bilgi, Paket};
@@ -38,6 +39,123 @@ const BILGI_ADI: &str = "guncelleme.json";
 const IMZA_ADI: &str = "guncelleme.json.sig";
 const IPTAL_ADI: &str = "iptal.json";
 const IPTAL_IMZA_ADI: &str = "iptal.json.sig";
+
+/// Ayarlar ve üst çubuk için durum. Önerilen sürüm ve notları, denetleyicinin yazdığı imzalı bilgiden BURADA
+/// yeniden doğrulanarak alınır; durum.json'a (ağa çıkan kullanıcının yazdığı) yalnız zaman/hata için bakılır
+/// (denetçi 24.11 O6/D-5).
+#[derive(serde::Serialize, Default)]
+struct Durum {
+    /// Güncelleme katmanı var mı (anahtar dosyası ve birimler)
+    katman: bool,
+    canli: bool,
+    imaj: Option<String>,
+    /// Kurulu (etkin) güncelleme; imajdakinden yeni değilse yok. Ayarlar için etkin-sec ile doğrulanır.
+    etkin: Option<String>,
+    /// Kurulu güncelleme var ama açılışta kullanılmayacak (doğrulanamadı, geri çekildi...): nedeni (denetçi 24.11 O-3)
+    etkin_red: Option<String>,
+    /// Bu açılışta imajdaki sürüme dönüldü mü
+    imaja_don: bool,
+    teklif: Option<Teklif>,
+    teklif_hata: Option<String>,
+    son_denetim: Option<String>,
+    son_denetim_hata: Option<String>,
+    son_kurulum: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct Teklif {
+    surum: String,
+    notlar: String,
+    yayin: String,
+    gecerlilik_sonu: String,
+    /// Kurulu/imaj sürümünden yeni mi
+    kurulabilir: bool,
+}
+
+/// Gösterilecek metin: denetim (Cc) ve biçim/yön (Cf: U+200B-200F, U+202A-202E, U+2060-206F, U+FEFF) karakterleri
+/// atılır; satır sonu yalnız izin verilirse kalır (denetçi 24.11 D-1).
+fn temiz_satirli(s: &str, n: usize, satir: bool) -> String {
+    s.chars()
+        .filter(|&c| {
+            let k = c as u32;
+            let bicim = (0x200B..=0x200F).contains(&k) || (0x202A..=0x202E).contains(&k) || (0x2060..=0x206F).contains(&k) || k == 0xFEFF;
+            !bicim && (!c.is_control() || (satir && c == '\n'))
+        })
+        .take(n)
+        .collect()
+}
+
+fn temiz(s: &str, n: usize) -> String {
+    temiz_satirli(s, n, false)
+}
+
+/// `agac`: kurulu güncellemeyi etkin-sec ile tam doğrula (Ayarlar; ağaç özeti alır). Üst çubuk her 30 dk çağırır,
+/// orada gerekmez.
+fn durum_topla(agac: bool) -> Durum {
+    let mut d = Durum { katman: Path::new(ANAHTARLAR).exists(), canli: canli_mi(), ..Default::default() };
+    let imaj = Imaj::oku(Path::new(IMAJ_SURUM), Path::new(AYAR)).ok();
+    d.imaj = imaj.as_ref().map(|i| i.surum.to_string());
+    if !d.katman || d.canli {
+        return d;
+    }
+    d.imaja_don = !matches!(std::fs::symlink_metadata(IMAJA_DON), Err(ref e) if e.kind() == std::io::ErrorKind::NotFound);
+    let y = Yerlesim::new(KOK);
+    if let (Ok(Some(s)), Some(i)) = (kur::surum_dosyasi_oku(&y.etkin()), &imaj) {
+        if s > i.surum {
+            d.etkin = Some(s.to_string());
+            if agac {
+                let son_j = dosya::oku_varsa(Path::new(SON_BILGI), bilgi::BILGI_AZAMI).ok().flatten();
+                let son_i = dosya::oku_varsa(Path::new(SON_IMZA), anahtar::IMZA_AZAMI).ok().flatten();
+                let secim = Anahtarlar::yukle(Path::new(ANAHTARLAR), Some(&y.iptal()))
+                    .and_then(|a| sec::etkin_sec(&y, &a, i, mimari(), zaman::simdi(), son_j.as_deref().zip(son_i.as_deref())));
+                match secim {
+                    Ok(Secim::Guncel(..)) => {}
+                    Ok(Secim::Imaj(n)) => {
+                        d.etkin = None;
+                        d.etkin_red = Some(temiz(&format!("{s}: {n}"), 300));
+                    }
+                    Err(e) => {
+                        d.etkin = None;
+                        d.etkin_red = Some(temiz(&format!("{s} doğrulanamadı: {}", e.0), 300));
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(Some(b)) = dosya::oku_varsa(&y.durum().join("son_kurulum"), 256) {
+        d.son_kurulum = String::from_utf8_lossy(&b).lines().find_map(|l| l.strip_prefix("zaman=")).map(|z| temiz(z, 32));
+    }
+    if let Ok(Some(b)) = dosya::oku_varsa(&Path::new(CALISMA).join("durum.json"), 8192) {
+        if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+            d.son_denetim = v["denetim"].as_str().map(|z| temiz(z, 32));
+            if v["durum"] == "hata" {
+                d.son_denetim_hata = v["hata"].as_str().map(|h| temiz(h, 300));
+            }
+        }
+    }
+    let c = Path::new(CALISMA);
+    let teklif = (|| -> Sonuc<Option<Teklif>> {
+        let Some(j) = dosya::oku_varsa(&c.join(BILGI_ADI), bilgi::BILGI_AZAMI)? else { return Ok(None) };
+        let s = dosya::oku_sinirli(&c.join(IMZA_ADI), anahtar::IMZA_AZAMI)?;
+        let ib = dosya::oku_varsa(&c.join(IPTAL_ADI), 4096)?;
+        let ii = dosya::oku_varsa(&c.join(IPTAL_IMZA_ADI), anahtar::IMZA_AZAMI)?;
+        let (_, a, imaj, taban) = cihaz_baglami(ib.as_deref().zip(ii.as_deref()))?;
+        let b = Baglam { mimari: mimari().into(), imaj_arayuzu: imaj.arayuz, imaj_tarihi: imaj.tarih, simdi: zaman::simdi(), sure_denetimi: true };
+        let v = bilgi::dogrula(&j, &s, &a, &b)?;
+        Ok(Some(Teklif {
+            surum: v.surum.to_string(),
+            notlar: temiz_satirli(&v.bilgi.notlar, bilgi::NOT_AZAMI, true),
+            yayin: v.bilgi.yayin.clone(),
+            gecerlilik_sonu: v.bilgi.gecerlilik_sonu.clone(),
+            kurulabilir: v.surum > taban,
+        }))
+    })();
+    match teklif {
+        Ok(t) => d.teklif = t,
+        Err(e) => d.teklif_hata = Some(temiz(&e.0, 300)),
+    }
+    d
+}
 
 /// Ortak bağlam: anahtarlar (kalıcı iptal kaydıyla), imaj, en yüksek kurulu sürüm.
 fn cihaz_baglami(ek_iptal: Option<(&[u8], &[u8])>) -> Sonuc<(Yerlesim, Anahtarlar, Imaj, Surum)> {
@@ -262,8 +380,9 @@ fn calistir(arg: Vec<String>) -> Sonuc<()> {
         }
         "bilgi-olustur" => {
             let s = secenek(r, "--surum").and_then(|s| Surum::coz(&s)).ok_or_else(|| hata!("--surum A.B.C gerekli"))?;
-            let gun: i64 = secenek(r, "--gecerlilik-gun").and_then(|g| g.parse().ok()).filter(|g| (1..=365).contains(g))
-                .ok_or_else(|| hata!("--gecerlilik-gun 1..365 gerekli"))?;
+            let gun: i64 = secenek(r, "--gecerlilik-gun").and_then(|g| g.parse().ok()).filter(|g| (1..=60).contains(g))
+                // Kısa tutulur: ele geçirilmiş denetleyici eski (geçerli) bilgiyi en çok bu kadar sunabilir (denetçi 24.11 O-2)
+                .ok_or_else(|| hata!("--gecerlilik-gun 1..60 gerekli (önerilen 30)"))?;
             let arayuz: u32 = secenek(r, "--imaj-arayuzu").and_then(|g| g.parse().ok()).ok_or_else(|| hata!("--imaj-arayuzu gerekli"))?;
             let notlar = std::fs::read_to_string(secenek(r, "--notlar").ok_or_else(|| hata!("--notlar DOSYA gerekli"))?)?;
             let geri: Vec<String> = secenek(r, "--geri-cekilen").map(|g| g.split(',').map(str::to_string).collect()).unwrap_or_default();
@@ -345,6 +464,26 @@ fn calistir(arg: Vec<String>) -> Sonuc<()> {
         "denetle" => denetle().inspect_err(|e| durum_yaz(serde_json::json!({ "durum": "hata", "hata": e.0 }))),
         "indir" => indir(),
         "kur-gelen" => kur_gelen(),
+        "durum" => {
+            // Ayarlar → Çoklu UYAP → Güncellemeler (oturum kullanıcısıyla; yalnız okur ve doğrular)
+            println!("{}", serde_json::to_string(&durum_topla(true)).expect("json"));
+            Ok(())
+        }
+        "cubuk" => {
+            // Üst çubuk göstergesi (waybar custom, return-type json): yalnız imzası doğrulanmış, kurulabilir sürüm
+            // varsa görünür; tıklayınca Ayarlar açılır (orada yeniden doğrulanır)
+            let d = durum_topla(false);
+            let v = match d.teklif.as_ref().filter(|t| t.kurulabilir) {
+                Some(t) => serde_json::json!({
+                    "text": "Güncelleme",
+                    "tooltip": format!("Çoklu UYAP {} hazır. Kurmak için tıklayın (Ayarlar).", t.surum),
+                    "class": "var",
+                }),
+                None => serde_json::json!({ "text": "", "class": "yok" }),
+            };
+            println!("{v}");
+            Ok(())
+        }
         "oz-denetim" => {
             // İmaj kancası (0230) için: canlı denetiminden BAĞIMSIZ olarak anahtar dosyası, imaj SURUM'u, ayar ve
             // seçim mantığı gerçekten çalışıyor mu (chroot'ta /proc olmayabilir; denetçi 24.11 O-3)
@@ -409,7 +548,7 @@ fn calistir(arg: Vec<String>) -> Sonuc<()> {
         }
         _ => Err(hata!(
             "komutlar: anahtar-uret, imzala, paketle, bilgi-olustur, iptal-olustur, dogrula, denetle, indir, kur-gelen, \
-             kur, buda, etkin-sec, imaja-don, iptal-ekle, oz-denetim"
+             kur, buda, etkin-sec, imaja-don, iptal-ekle, oz-denetim, durum, cubuk"
         )),
     }
 }
@@ -458,5 +597,18 @@ fn main() -> ExitCode {
             eprintln!("armonia-guncelle: HATA: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod testler {
+    use super::temiz_satirli;
+
+    #[test]
+    fn gosterim_suzgeci() {
+        let kotu = "a\u{202E}b\u{2066}c\u{200B}d\u{FEFF}e\u{1b}[31mf\ng";
+        assert_eq!(temiz_satirli(kotu, 100, false), "abcde[31mfg");
+        assert_eq!(temiz_satirli(kotu, 100, true), "abcde[31mf\ng");
+        assert_eq!(temiz_satirli("çğıöşü İ", 3, false), "çğı");
     }
 }

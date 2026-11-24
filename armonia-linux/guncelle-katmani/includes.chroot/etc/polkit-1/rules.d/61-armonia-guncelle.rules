@@ -13,6 +13,9 @@ polkit.addRule(function(action, subject) {
     if (u == "armonia-guncelle-denetle.service" || u == "armonia-guncelle-imaja-don.service") {
         return polkit.Result.YES;
     }
+    // AUTH_SELF_KEEP: her 'systemctl' süreci ayrı bir özne olduğundan pratikte her kurulumda yeniden sorulur.
+    // Pencereyi oturumdaki herhangi bir süreç tetikleyebilir; sonucu yalnız imzalı paketin kurulmasıdır
+    // (denetçi 24.11 D-4). Pi'de 'armonia' parolası ilk açılışta belirlenir (G1/G3).
     if (u == "armonia-guncelle-indir.service") {
         return polkit.Result.AUTH_SELF_KEEP;
     }

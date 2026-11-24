@@ -3,6 +3,7 @@
 //! kurulunca), Hakkında. Yetki gerektiren her değişiklik `pkexec ayar-yardimci` üzerinden (dar alt komutlar).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod guncelleme;
 mod sistem;
 
 use egui::{Color32, RichText};
@@ -12,6 +13,11 @@ use std::sync::mpsc;
 enum IsSonucu {
     Tarama(Result<Vec<sistem::WifiAgi>, String>),
     Baglanti(Result<(), String>, String),
+    /// Çoklu UYAP güncellemesi: denetim ya da indir + kur (kurulan sürüm)
+    Denetim(Result<(), String>),
+    Kurulum(Result<String, String>),
+    /// Çoklu UYAP'ı durdurup açma gibi kısa ama bekleten işler (arayüz donmasın; denetçi 24.11 D-3)
+    Islem(Result<(), String>, String),
 }
 
 /// Hata/uyarı rengi temadan bağımsız (anlam taşır).
@@ -117,6 +123,11 @@ struct Uygulama {
     parola: String,
     is_kanali: Option<mpsc::Receiver<IsSonucu>>,
     is_metni: String,
+    // Çoklu UYAP güncellemeleri
+    guncelleme: Result<guncelleme::Durum, String>,
+    /// Kurulum bitti, Çoklu UYAP açıksa yeniden başlatma önerilir
+    yeniden_baslat_oner: bool,
+    imaja_don_sor: bool,
 }
 
 impl Uygulama {
@@ -144,6 +155,9 @@ impl Uygulama {
             parola: String::new(),
             is_kanali: None,
             is_metni: String::new(),
+            guncelleme: Ok(Default::default()),
+            yeniden_baslat_oner: false,
+            imaja_don_sor: false,
         };
         u.yenile();
         // `armonia-ayarlar yazicilar` gibi doğrudan bölümle açılabilsin (dock kutucuğu)
@@ -153,10 +167,13 @@ impl Uygulama {
                 "ekran" => Bolum::Ekran,
                 "yazicilar" => Bolum::Yazicilar,
                 "usb" => Bolum::Usb,
+                // Üst çubuktaki "Güncelleme" göstergesi buraya açar
+                "cokluuyap" => Bolum::CokluUyap,
                 "gorunum" => Bolum::Gorunum,
                 "hakkinda" => Bolum::Hakkinda,
                 _ => Bolum::Klavye,
             };
+            u.yenile();
         }
         u
     }
@@ -168,6 +185,10 @@ impl Uygulama {
         self.yazicilar = sistem::yazicilar();
         self.ag = sistem::ag_durumu();
         self.kayitli = sistem::kayitli_wifi();
+        // Kurulu güncellemenin ağacı da doğrulanır (özet alır): yalnız bu bölüm açıkken
+        if self.bolum == Bolum::CokluUyap {
+            self.guncelleme = guncelleme::durum();
+        }
     }
 
     fn is_baslat(&mut self, metin: &str, ctx: &egui::Context, is: impl FnOnce() -> IsSonucu + Send + 'static) {
@@ -197,6 +218,20 @@ impl Uygulama {
                 if let Ok(l) = sistem::wifi_tara() {
                     self.wifi = l;
                 }
+            }
+            IsSonucu::Denetim(r) => {
+                self.sonuc(r, "Güncelleme bilgisi denetlendi.");
+                sistem::ust_cubuk_yenile();
+            }
+            IsSonucu::Islem(r, iyi) => self.sonuc(r, &iyi),
+            IsSonucu::Kurulum(r) => {
+                let iyi = match &r {
+                    Ok(s) if !s.is_empty() => format!("Çoklu UYAP {s} kuruldu."),
+                    _ => "Güncelleme kuruldu.".to_string(),
+                };
+                self.yeniden_baslat_oner = r.is_ok() && guncelleme::cokluuyap_calisiyor();
+                self.sonuc(r.map(|_| ()), &iyi);
+                sistem::ust_cubuk_yenile();
             }
         }
     }
@@ -594,6 +629,190 @@ impl Uygulama {
                 );
             }
         });
+        if kurulu {
+            self.guncellemeler(ui);
+        }
+    }
+
+    fn guncellemeler(&mut self, ui: &mut egui::Ui) {
+        let d = match &self.guncelleme {
+            Ok(d) => d.clone(),
+            Err(e) => {
+                kart(ui, |ui| {
+                    ui.label(RichText::new("Güncellemeler").strong());
+                    ui.label(RichText::new(e).color(UYARI));
+                });
+                return;
+            }
+        };
+        let mesgul = self.is_kanali.is_some();
+        let mut eylem: Option<&str> = None;
+        kart(ui, |ui| {
+            ui.label(RichText::new("Güncellemeler").strong());
+            if d.canli {
+                aciklama(
+                    ui,
+                    "USB'den (canlı) çalışırken Çoklu UYAP güncellenmez; her açılışta imajdaki sürüm açılır. Yeni sürüm \
+                     için güncel Armonia ISO'sunu belleğe yazın.",
+                );
+                return;
+            }
+            if !d.katman {
+                aciklama(ui, "Bu sistemde Çoklu UYAP yalnız Armonia imajıyla birlikte güncellenir.");
+                return;
+            }
+            egui::Grid::new("guncelleme").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
+                let satir = |ui: &mut egui::Ui, k: &str, v: String| {
+                    ui.label(RichText::new(k).color(r().soluk));
+                    ui.label(v);
+                    ui.end_row();
+                };
+                satir(ui, "İmajdaki sürüm", d.imaj.clone().unwrap_or_else(|| "bilinmiyor".into()));
+                satir(ui, "Kurulu güncelleme", d.etkin.clone().unwrap_or_else(|| "yok (imajdaki sürüm)".into()));
+                if let Some(z) = &d.son_kurulum {
+                    satir(ui, "Son kurulum", guncelleme::yerel_zaman(z));
+                }
+                // Zamanı ağa çıkan denetleyici yazar; imzalı değildir (denetçi 24.11 O-2)
+                satir(
+                    ui,
+                    "Son denetim",
+                    d.son_denetim.as_deref().map(|z| format!("{} (denetleyicinin bildirdiği)", guncelleme::yerel_zaman(z))).unwrap_or_else(|| "henüz yok".into()),
+                );
+            });
+            if let Some(n) = &d.etkin_red {
+                ui.label(
+                    RichText::new(format!("Kurulu güncelleme kullanılmıyor, Çoklu UYAP imajdaki sürümle açılır: {n}"))
+                        .size(13.0)
+                        .color(UYARI),
+                );
+            }
+            if d.imaja_don {
+                ui.label(
+                    RichText::new(
+                        "Bu açılışta imajdaki sürüm çalışıyor (güncellenmiş sürüm açılamadı ya da siz istediniz). \
+                         Bilgisayar yeniden başlayınca kurulu güncelleme kullanılır.",
+                    )
+                    .color(UYARI),
+                );
+            }
+            if let Some(h) = &d.son_denetim_hata {
+                ui.label(RichText::new(format!("Son denetim başarısız: {h}")).size(13.0).color(UYARI));
+            }
+            if let Some(h) = &d.teklif_hata {
+                ui.label(RichText::new(format!("Güncelleme bilgisi doğrulanamadı: {h}")).size(13.0).color(UYARI));
+            }
+            ui.add_space(4.0);
+            match &d.teklif {
+                Some(t) if t.kurulabilir => {
+                    ui.label(
+                        RichText::new(format!("Yeni sürüm: {} ({})", t.surum, guncelleme::yerel_zaman(&t.yayin)))
+                            .strong()
+                            .color(r().baslik),
+                    );
+                    if !t.notlar.is_empty() {
+                        aciklama(ui, &t.notlar);
+                    }
+                    aciklama(
+                        ui,
+                        "Paket cokluuyap.com'dan indirilir; imzası ve her dosyası doğrulanmadan kurulmaz. Parolanız \
+                         sorulur. Kurulum bitince Çoklu UYAP yeniden açıldığında yeni sürüm çalışır.",
+                    );
+                    if ui.add_enabled(!mesgul, egui::Button::new(format!("{} sürümünü indir ve kur", t.surum))).clicked() {
+                        eylem = Some("kur");
+                    }
+                }
+                Some(t) => {
+                    // "Güncel" yalnız son imzalı bilgiye göredir; yayın tarihi gösterilir ki eski bilgi fark edilsin
+                    ui.label(
+                        RichText::new(format!(
+                            "Çoklu UYAP güncel (son imzalı yayın bilgisi: {} sürümü, {}).",
+                            t.surum,
+                            guncelleme::yerel_zaman(&t.yayin)
+                        ))
+                        .color(r().baslik),
+                    );
+                }
+                None => aciklama(
+                    ui,
+                    "Güncelleme bilgisi henüz alınmadı. Açılıştan yaklaşık 10 dakika sonra ve günde bir kendiliğinden denetlenir.",
+                ),
+            }
+            ui.horizontal(|ui| {
+                if ui.add_enabled(!mesgul, egui::Button::new("Şimdi denetle")).clicked() {
+                    eylem = Some("denetle");
+                }
+                if mesgul {
+                    ui.spinner();
+                    ui.label(&self.is_metni);
+                }
+            });
+            if self.yeniden_baslat_oner {
+                ui.separator();
+                ui.label("Çoklu UYAP açık. Yeni sürüm, Çoklu UYAP yeniden açılınca çalışır; süren işler durur.");
+                ui.horizontal(|ui| {
+                    if ui.button("Çoklu UYAP'ı yeniden başlat").clicked() {
+                        eylem = Some("yeniden");
+                    }
+                    if ui.button("Sonra").clicked() {
+                        eylem = Some("sonra");
+                    }
+                });
+            }
+        });
+        if d.katman && !d.canli && d.etkin.is_some() && !d.imaja_don {
+            kart(ui, |ui| {
+                ui.label(RichText::new("Sorun olursa").strong());
+                aciklama(
+                    ui,
+                    "Güncellenmiş Çoklu UYAP düzgün çalışmazsa bu açılış boyunca imajdaki sürümle açabilirsiniz. Bu kalıcı \
+                     değildir; yeniden başlatınca kurulu güncelleme kullanılır. İmajdaki sürüm daha eski olduğundan, \
+                     yalnız gerektiğinde kullanın.",
+                );
+                if self.imaja_don_sor {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Çoklu UYAP kapatılıp imajdaki sürümle açılsın mı?").color(UYARI));
+                        if ui.button("Evet").clicked() {
+                            eylem = Some("imaja-don");
+                        }
+                        if ui.button("Vazgeç").clicked() {
+                            eylem = Some("imaja-vazgec");
+                        }
+                    });
+                } else if ui.add_enabled(!mesgul, egui::Button::new("Bu açılışta imajdaki sürümle aç")).clicked() {
+                    eylem = Some("imaja-sor");
+                }
+            });
+        }
+        match eylem {
+            Some("denetle") => self.is_baslat("Denetleniyor…", ui.ctx(), || IsSonucu::Denetim(guncelleme::denetle())),
+            Some("kur") => {
+                self.yeniden_baslat_oner = false;
+                self.is_baslat("İndiriliyor ve doğrulanıyor…", ui.ctx(), || IsSonucu::Kurulum(guncelleme::indir_ve_kur()));
+            }
+            Some("yeniden") => {
+                self.yeniden_baslat_oner = false;
+                self.is_baslat("Çoklu UYAP yeniden başlatılıyor…", ui.ctx(), || {
+                    IsSonucu::Islem(guncelleme::cokluuyap_yeniden_baslat(), "Çoklu UYAP yeni sürümle açılıyor.".into())
+                });
+            }
+            Some("sonra") => self.yeniden_baslat_oner = false,
+            Some("imaja-sor") => self.imaja_don_sor = true,
+            Some("imaja-vazgec") => self.imaja_don_sor = false,
+            Some("imaja-don") => {
+                self.imaja_don_sor = false;
+                self.is_baslat("İmajdaki sürüme geçiliyor…", ui.ctx(), || {
+                    let r = guncelleme::imaja_don().and_then(|_| {
+                        if guncelleme::cokluuyap_calisiyor() {
+                            guncelleme::cokluuyap_yeniden_baslat()
+                        } else {
+                            Ok(())
+                        }
+                    });
+                    IsSonucu::Islem(r, "Bu açılışta Çoklu UYAP imajdaki sürümle açılacak.".into())
+                });
+            }
+            _ => {}
+        }
     }
 
     fn gorunum(&mut self, ui: &mut egui::Ui) {

@@ -165,7 +165,7 @@ pub fn bilgi() -> Bilgi {
         sistem: format!("Armonia ({ad}){}", if canli() { " — canlı (deneme)" } else { "" }),
         cekirdek: calistir("uname", &["-r"]).unwrap_or_default().trim().to_string(),
         bellek: std::fs::read_to_string("/proc/meminfo").ok().and_then(|m| bellek_coz(&m)).unwrap_or_default(),
-        disk: if disk.is_empty() { String::new() } else { format!("{disk}") },
+        disk,
         islemci,
     }
 }

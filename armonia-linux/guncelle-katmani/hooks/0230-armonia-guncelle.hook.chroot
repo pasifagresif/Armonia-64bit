@@ -54,6 +54,16 @@ fi
 
 # İkili bu mimaride çalışıyor, anahtar/SURUM/ayar okunuyor ve kurulu güncelleme yokken imajı seçiyor (boş çıktı).
 # Çıkış kodu da denetlenir: hata da boş çıktı verir (denetçi 24.11 O-3).
+# Üst çubuk göstergesi: imzası doğrulanmış yeni sürüm varsa "Güncelleme" hapı; tıklayınca Ayarlar → Çoklu UYAP.
+# Yalnız bu katmanla eklenir (ISO'da modül yok). signal 8: Ayarlar kurulumdan sonra yeniler.
+U=/etc/armonia/waybar/ust.jsonc
+if ! grep -q '"custom/guncelleme"' "$U"; then
+  sed -i 's|"modules-right": \["memory",|"modules-right": ["custom/guncelleme", "memory",|' "$U"
+  sed -i '/^  "custom\/eimza": /a\  "custom/guncelleme": { "exec": "/opt/armonia/guncelle/armonia-guncelle cubuk", "return-type": "json", "interval": 1800, "signal": 8, "on-click": "/opt/armonia/uygulamalar/armonia-ayarlar cokluuyap" },' "$U"
+fi
+grep -q '"modules-right": \["custom/guncelleme",' "$U" && grep -q '^  "custom/guncelleme": { "exec": "/opt/armonia/guncelle/armonia-guncelle cubuk"' "$U" \
+  || { echo "HATA: üst çubuğa güncelleme göstergesi eklenemedi"; exit 1; }
+
 # oz-denetim canlı denetiminden bağımsızdır (chroot'ta /proc olmayabilir; etkin-sec orada hiçbir şey sınamadan
 # boş dönerdi).
 "$B" oz-denetim || { echo "HATA: armonia-guncelle oz-denetim başarısız"; exit 1; }

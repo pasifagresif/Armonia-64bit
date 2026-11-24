@@ -10,6 +10,8 @@ window#waybar { background: alpha(#@ZEMIN@, 0.96); color: #@YAZI@; border: 1px s
 #clock { font-size: 14px; }
 #memory, #custom-klavye, #custom-eimza { background: #@HAP@; border-radius: 9px; margin: 7px 0; padding: 0 10px; }
 #custom-eimza.hazir { color: #@VURGU_UZERI@; background: #@VURGU@; }
+/* Coklu UYAP guncellemesi (guncelleme katmani, yalniz Pi): imzasi dogrulanmis yeni surum varsa gorunur */
+#custom-guncelleme.var { color: #@VURGU_UZERI@; background: #@VURGU@; border-radius: 9px; margin: 7px 0; padding: 0 10px; }
 #custom-eimza.kapali { color: #FAF8F4; background: #A0522D; }
 #memory.uyari { color: #A0522D; }
 #memory.kritik { color: #FAF8F4; background: #A0522D; }

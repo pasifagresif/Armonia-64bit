@@ -233,7 +233,18 @@ Root gerekmez. Ayrı sistem kullanıcıları:
      saklanır.
 2. Katman + birimler + nft + polkit; denetçi.
 3. Çoklu UYAP birimi ve çalıştırma betiği değişikliği; denetçi.
-4. Ayarlar/waybar arayüzü.
+4. ✅ (24.11) Ayarlar → Çoklu UYAP → Güncellemeler (`armonia-uygulamalar/ayarlar/src/guncelleme.rs`) ve üst çubuk
+   göstergesi (kanca 0230 `ust.jsonc`'a `custom/guncelleme` ekler; yalnız Pi).
+   - Durum `armonia-guncelle durum` ile (oturum kullanıcısı): önerilen sürüm imzadan yeniden doğrulanır, kurulu
+     sürüm etkin-sec ile doğrulanır (kullanılmayacaksa nedeni gösterilir); durum.json'dan yalnız zaman/hata.
+     Gösterge `armonia-guncelle cubuk` (ağaç doğrulamasız, 30 dk; signal 8).
+   - İşlemler `systemctl start`: denetle, indir (+ kur; parola), imaja-dön (onaylı, uyarılı); Çoklu UYAP yeniden
+     başlatma. Kurulum sonucu `durum/son_kurulum` değişince başarı; yeni InvocationID + failed hata.
+   - Denetçi 3. tur (24.11): "DÜZELTMEYLE KULLANILABİLİR"; düzeltildi: O-1 (başarılı birim GC → InvocationID boş),
+     O-2 ("güncel" yanında son imzalı yayın tarihi, "son denetim (denetleyicinin bildirdiği)", yayıncı
+     `--gecerlilik-gun` 1..60), O-3 (kurulu sürüm doğrulanır), D-1 (Cf yön karakterleri süzülür, notlar dahil),
+     D-2 (denetimden sonra gösterge yenilenir), D-3 (bekleten işler arka planda), D-4 (polkit yorumu).
+     Doğrulanacak (Pi): polkit penceresinin görünüşü, başarılı kurucu biriminin GC davranışı.
 5. Yayın betiği ve anahtar üretimi (kullanıcıyla, çevrimdışı).
 6. Linux'ta uçtan uca deneme: yerel deneme sunucusuyla (127.0.0.1 değil, ayrı makine/VM) sahte imza, eski
   sürüm, bozuk paket, çöken sürüm → geri dönüş.
