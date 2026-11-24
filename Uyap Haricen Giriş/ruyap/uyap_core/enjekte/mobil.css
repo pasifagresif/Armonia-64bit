@@ -25,10 +25,10 @@ html.cu-mobil { --cu-cubuk-yuk: calc(52px + env(safe-area-inset-bottom, 0px)); }
    UYAP'ın mobil çubuğu 68 px çiziliyor, içerik 60 px'ten başlıyordu (8 px bindirme). Çubuk 60 px'e iner;
    düğmeler parmakla basılacak boyda. Soldaki düğme (☰) bizim sol menümüzü açar (gorevcubugu.js); simgesi
    UYAP'ın kendi durumuna değil menümüzün durumuna göre çizilir. */
-html.cu-dar nav.navbar.u-navbar { padding-top: 4px !important; padding-bottom: 4px !important; min-height: 60px; }
+html.cu-dar nav.navbar.u-navbar { padding-top: 0 !important; padding-bottom: 0 !important; }   /* yükseklik: tema.css --cu-nav-yuk */
 html.cu-dar .u-navbar .nav-btn-group { display: flex; align-items: center; gap: 2px; }
 html.cu-dar .u-navbar .nav-btn-group .navbar-toggler {
-    display: inline-flex !important; align-items: center; justify-content: center; min-width: 44px; height: 44px;
+    display: inline-flex !important; align-items: center; justify-content: center; min-width: 42px; height: 40px;
     padding: 0 !important; border-radius: 10px; }
 html.cu-dar .u-navbar .nav-btn-group .navbar-toggler:active { background: var(--cu-ust-hover, rgba(255, 255, 255, 0.18)); }
 html.cu-dar .u-navbar .nav-btn-group .navbar-toggler > i { font-size: 20px; }
@@ -39,6 +39,27 @@ html.cu-dar .u-navbar .navbar-collapse .navbar-nav > li:first-child { flex: 0 0 
 html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item,
 html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item > .nav-link,
 html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item > div > .nav-link { height: 44px !important; min-width: 44px; }
+
+/* ══ 1b) YATIK TELEFON: üst ve alt çubuk ince (kullanıcı bildirimi 2026-11-23: telefon yan çevrilince üst çubuk,
+   altındaki tarih satırı ve görev çubuğu ekranın yarısına yakınını kaplıyordu). Üst çubuk 38 px, tarih satırı
+   gizli, görev çubuğu 38 px; dosya düğmeleri tek satır (yalnız dosya no). ══ */
+@media (orientation: landscape) and (max-height: 520px) {
+    :root, html.cu-mobil { --cu-nav-yuk: 38px; --cu-cubuk-yuk: calc(38px + env(safe-area-inset-bottom, 0px)); }
+    .u-navbar ~ .small-date, .small-date { display: none !important; }
+    html.cu-dar .u-navbar .nav-btn-group .navbar-toggler { height: 34px; min-width: 38px; }
+    html.cu-dar .u-navbar .nav-btn-group .navbar-toggler > i { font-size: 17px; }
+    .cu-logo-isaret, .u-navbar .navbar-brand img.cu-logo-isaret { width: 24px; height: 24px; border-radius: 6px; }
+    html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item,
+    html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item > .nav-link,
+    html.cu-mobil .u-navbar .navbar-collapse .navbar-nav > li.nav-item > div > .nav-link { height: 36px !important; min-width: 36px; }
+    html.cu-mobil #uyap-gorev-cubugu .cu-gc-marka { width: 40px; margin: 4px 0 4px 6px; }
+    html.cu-mobil #uyap-gorev-cubugu .cu-gc-marka > i.logo img { width: 26px; height: 26px; }
+    html.cu-mobil #uyap-gorev-cubugu .cu-gc { height: 30px; border-radius: 8px; }
+    html.cu-mobil #uyap-gorev-cubugu .cu-gc.iki .cu-gc-alt { display: none; }
+    html.cu-mobil body:has(> #uyap-issekme) #uyap-gorev-cubugu { padding-right: 52px; }
+    html.cu-mobil #uyap-issekme { width: 40px; height: 30px; bottom: calc(4px + env(safe-area-inset-bottom, 0px)); }
+    html.cu-mobil #uyap-issekme::before { width: 18px; height: 18px; }
+}
 
 /* ══ 2) SOL MENÜ (dar ekran): içeriği itmez, üstüne açılır ══
    Üst çubuğun altından görev çubuğuna kadar bir yaprak; arkası karartılır (#cu-sol-perde, dokununca kapanır).

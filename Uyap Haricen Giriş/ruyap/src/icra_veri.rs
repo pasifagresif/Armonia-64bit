@@ -145,6 +145,7 @@ metin_secenek! {
         Konkordato = "konkordato", "Konkordato";
         Vefat = "vefat", "Vefat";
         Vasi = "vasi", "Vasi";
+        TehiriIcra = "tehiri_icra", "Tehir-i İcra";
         DurdurulmusIcraMahItiraz = "durd_icra_mah_itiraz", "Durdurulmuş: İcra Mahkemesine İtiraz";
         DurdurulmusGenelMahDava = "durd_genel_mah_dava", "Durdurulmuş: Genel Mahkemeye Dava Açılması";
         DurdurulmusTehiriIcra = "durd_tehiri_icra", "Durdurulmuş: Tehir-i İcra Kararı";
@@ -385,8 +386,16 @@ fn j_tam(rec: &Value, anahtar: &str) -> i64 {
     }
 }
 
-/// "2025/237" → (2025, 237). Ayrıştırılamazsa (0, 0).
+/// "2025/237" → (2025, 237). Yenilenen dosya "2026/5683 - ( 2022/11833 )" → (2026, 5683): UYAP'ın verdiği
+/// yeni numara öndedir, eski numara parantezdedir. Ayrıştırılamazsa (0, 0).
+///
+/// 21.11.2026: bu biçim eskiden (0, 0) oluyordu; dosya (daire, yıl, sıra, tür) ile tanındığı için bir dairedeki
+/// bütün yenilenmiş dosyalar tek satırda üst üste yazılıyordu.
 pub fn yil_sira(dosya_no: &str) -> (i32, i32) {
+    let dosya_no = match dosya_no.split_once('(') {
+        Some((on, _)) => on.trim_end().trim_end_matches('-'),
+        None => dosya_no,
+    };
     let Some((y, s)) = dosya_no.split_once('/') else { return (0, 0) };
     match (y.trim().parse::<i32>(), s.trim().parse::<i32>()) {
         (Ok(y), Ok(s)) if y >= 0 && s >= 0 => (y, s),
@@ -1178,6 +1187,11 @@ mod tests {
         assert_eq!(yil_sira("2025"), (0, 0));
         assert_eq!(yil_sira(""), (0, 0));
         assert_eq!(yil_sira("-1/5"), (0, 0));
+        // Yenilenen dosya: yeni numara öndedir
+        assert_eq!(yil_sira("2026/5683 - ( 2022/11833 )"), (2026, 5683));
+        assert_eq!(yil_sira("2022/8742 - ( 2014/10733 )"), (2022, 8742));
+        assert_eq!(yil_sira("2022/8742-(2014/10733)"), (2022, 8742));
+        assert_eq!(yil_sira("( 2014/10733 )"), (0, 0));
     }
 
     #[test]

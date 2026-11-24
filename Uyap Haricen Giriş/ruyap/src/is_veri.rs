@@ -72,6 +72,7 @@ pub mod olay {
     pub const ERTELEME_REDDEDILDI: &str = "erteleme_reddedildi";
     pub const SONRAKI_ACILDI: &str = "sonraki_acildi";
     pub const TASINDI: &str = "tasindi";
+    pub const HATIRLATILDI: &str = "hatirlatildi";
 }
 
 fn gecerli(liste: &[(&str, &str)], k: &str) -> bool {
@@ -242,7 +243,14 @@ pub fn kullanici_esitle<C: GenericClient>(c: &mut C, hesap_adi: &str, ad: &str, 
         return Err("Hesap adı boş olamaz.".into());
     }
     let rol = if yonetici { "yonetici" } else { "uye" };
-    let ad = if ad.trim().is_empty() { hesap } else { ad.trim() };
+    // Bulut bazı hesaplarda görünen ad olarak ofis adını veriyor (zeynel@savas → "savas"): o zaman kullanıcı adı.
+    let (kullanici_adi, ofis) = hesap.split_once('@').unwrap_or((hesap, ""));
+    let ad = ad.trim();
+    let ad = if ad.is_empty() || (!ofis.is_empty() && ad.to_lowercase() == ofis.to_lowercase()) {
+        if kullanici_adi.is_empty() { hesap } else { kullanici_adi }
+    } else {
+        ad
+    };
     c.query_one(
         "INSERT INTO kullanici (hesap_adi, ad, rol, aktif) VALUES ($1, $2, $3, $4)
          ON CONFLICT (hesap_adi) DO UPDATE SET ad = EXCLUDED.ad, rol = EXCLUDED.rol, aktif = EXCLUDED.aktif,
@@ -1114,7 +1122,9 @@ pub fn ek_sil<C: GenericClient>(c: &mut C, k: &Kisi, id: i64) -> Result<(), Stri
     let mut tx = c.transaction().map_err(hata)?;
     tx.execute("DELETE FROM gorev_ek WHERE id = $1", &[&id]).map_err(hata)?;
     olay_yaz(&mut tx, Some(gorev), Some(k.id), olay::EK, json!({"silinen": id, "ad": r.get::<_, String>(2)}))?;
-    let baska: bool = tx.query_one("SELECT EXISTS (SELECT 1 FROM gorev_ek WHERE sha256 = $1)", &[&sha]).map_err(hata)?.get(0);
+    // Aynı dosyayı başka ek ya da bir belge sürümü (belge_veri.rs, aynı depo) kullanıyorsa diskten silinmez.
+    let baska: bool = tx.query_one("SELECT EXISTS (SELECT 1 FROM gorev_ek WHERE sha256 = $1)", &[&sha]).map_err(hata)?.get(0)
+        || crate::belge_veri::sha_kullaniliyor(&mut tx, &sha)?;
     tx.commit().map_err(hata)?;
     if !baska && sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()) {
         let _ = std::fs::remove_file(crate::is_aktar::ekler_dizini().join(&sha));
@@ -1450,6 +1460,7 @@ pub fn gorev_ayrinti<C: GenericClient>(c: &mut C, k: &Kisi, id: i64, bugun: Naiv
     v["notlar"] = json!(notlar);
     v["kisiler"] = json!(kisiler);
     v["ekler"] = json!(ekler);
+    v["belgeler"] = json!(crate::belge_veri::gorev_belgeleri(c, id)?);
     v["ertelemeler"] = json!(ertelemeler);
     v["gecmis"] = json!(gecmis);
     v["sonuclar"] = json!(sonuclar);
@@ -1612,6 +1623,82 @@ pub fn hatirlatici_kur<C: GenericClient>(
     )
     .map(|r| r.get(0))
     .map_err(hata)
+}
+
+/// Onayda bekleyen iş için onaylayana hatırlatma: onaylayıcıların (yoksa işi başkasına açanın, o da yoksa
+/// yöneticilerin) Çoklu UYAP'ında hemen uyarı çıkar (hatırlatıcı, zaman = şimdi; telefon sinyali de aynı yoldan).
+/// Yalnız işte çalışabilen (sunan / sorumlu / yönetici) gönderir; aynı kişiye aynı iş için saatte bir.
+pub fn onay_hatirlat<C: GenericClient>(c: &mut C, k: &Kisi, gorev: i64, notu: &str) -> Result<Vec<String>, String> {
+    let oz = gorev_ozu(c, gorev)?.ok_or("İş bulunamadı.")?;
+    let y = yetki(c, &oz, k)?;
+    if !y.gorebilir {
+        return Err("İş bulunamadı.".into());
+    }
+    if oz.durum != "onayda" {
+        return Err("Bu iş onay beklemiyor.".into());
+    }
+    if !y.calisabilir {
+        return Err("Hatırlatmayı işin sorumlusu ya da onaya sunan gönderebilir.".into());
+    }
+    let mut alicilar: Vec<i64> = c
+        .query(
+            "SELECT DISTINCT gk.kullanici_id FROM gorev_kisi gk JOIN kullanici u ON u.id = gk.kullanici_id
+             WHERE gk.gorev_id = $1 AND gk.rol = 'onaylayici' AND u.aktif",
+            &[&gorev],
+        )
+        .map_err(hata)?
+        .iter()
+        .map(|r| r.get(0))
+        .collect();
+    if alicilar.is_empty() {
+        if let Some(o) = oz.olusturan_id.filter(|o| oz.sorumlu_id != Some(*o)) {
+            alicilar.push(o);
+        }
+    }
+    if alicilar.is_empty() {
+        alicilar = c
+            .query("SELECT id FROM kullanici WHERE rol = 'yonetici' AND aktif", &[])
+            .map_err(hata)?
+            .iter()
+            .map(|r| r.get(0))
+            .collect();
+    }
+    alicilar.retain(|a| *a != k.id);
+    if alicilar.is_empty() {
+        return Err("Hatırlatılacak onaylayıcı yok (onaylayıcı siz misiniz?).".into());
+    }
+    let ben: String = c.query_one("SELECT ad FROM kullanici WHERE id = $1", &[&k.id]).map_err(hata)?.get(0);
+    let baslik: String = c.query_one("SELECT baslik FROM gorev WHERE id = $1", &[&gorev]).map_err(hata)?.get(0);
+    let ek: String = notu.trim().chars().take(400).collect();
+    let metin = format!("{ben} onayınızı bekliyor.{}", if ek.is_empty() { String::new() } else { format!(" Not: {ek}") });
+    let mut tx = c.transaction().map_err(hata)?;
+    let mut adlar = Vec::new();
+    for a in alicilar {
+        let yakin: i64 = tx
+            .query_one(
+                "SELECT count(*) FROM hatirlatici WHERE gorev_id = $1 AND kullanici_id = $2 AND olusturan_id = $3
+                 AND olusturulma > now() - interval '1 hour'",
+                &[&gorev, &a, &k.id],
+            )
+            .map_err(hata)?
+            .get(0);
+        let ad: String = tx.query_one("SELECT ad FROM kullanici WHERE id = $1", &[&a]).map_err(hata)?.get(0);
+        if yakin > 0 {
+            continue;
+        }
+        tx.execute(
+            "INSERT INTO hatirlatici (gorev_id, kullanici_id, olusturan_id, zaman, baslik, notu) VALUES ($1, $2, $3, now(), $4, $5)",
+            &[&gorev, &a, &k.id, &baslik.chars().take(300).collect::<String>(), &metin],
+        )
+        .map_err(hata)?;
+        adlar.push(ad);
+    }
+    if adlar.is_empty() {
+        return Err("Son bir saat içinde zaten hatırlattınız.".into());
+    }
+    olay_yaz(&mut tx, Some(gorev), Some(k.id), olay::HATIRLATILDI, json!({"kime": adlar, "notu": ek}))?;
+    tx.commit().map_err(hata)?;
+    Ok(adlar)
 }
 
 pub fn hatirlatici_sil<C: GenericClient>(c: &mut C, k: &Kisi, id: i64) -> Result<(), String> {

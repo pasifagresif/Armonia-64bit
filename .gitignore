@@ -89,3 +89,7 @@ zs_vapid.key
 
 # ── Armonia: üçüncü parti büyük ikili paket (70 MB; resmî kaynaktan indirilir, bkz. docs/GUNCEL_DURUM_2026-11-19.md) ──
 armonia-linux/config/packages.chroot/*.deb
+
+# ruyap: WiX araçları (msi_hazirla indirir) ve elle tutulan eski exe yedekleri
+Uyap Haricen Giriş/ruyap/araclar/wix311/
+Uyap Haricen Giriş/ruyap/*.exe.onceki*

@@ -203,8 +203,10 @@ DOSYA = {"kunye": {"id": 1, "birim": "İzmir 5. İcra Dairesi", "dosya_no": "202
                    "bekleme_bitis": None, "son_guncelleme": "2026-11-19 10:00", "uyap": {}},
          "takip": {"okundu": False, "kesinlesme_suresi_gun": 7},
          "taraflar": [],
-         "tebligatlar": [dict(teb(1, "Ödeme Emri", "DAĞITIMDA", False), evrak_no=5, muhatap="BORÇLU AHMET YILMAZ", hareket_sayisi=0),
-                         dict(teb(2, "103 Davetiyesi", "", False), evrak_no=6, muhatap="BORÇLU AHMET YILMAZ", hareket_sayisi=0)]}
+         "tebligatlar": [dict(teb(1, "Ödeme Emri", "DAĞITIMDA", False), evrak_no=5, muhatap="BORÇLU AHMET YILMAZ", hareket_sayisi=0, mazbata_elle=False),
+                         dict(teb(2, "103 Davetiyesi", "", False), evrak_no=6, muhatap="BORÇLU AHMET YILMAZ", hareket_sayisi=0, mazbata_elle=False)],
+         "mazbatalar": [{"evrak_no": 9, "tur": "Kapalı Tebliğ Mazbatası", "aciklama": "", "evrak_tarihi": "20/10/2026", "elle_tebligat": None}]}
+MZ_POST = []
 
 def gt_karsila(route):
     u = urllib.parse.urlparse(route.request.url)
@@ -290,6 +292,9 @@ def karsila(route):
         veri = {"guncellenen": 1}
     elif uc == "gecmis":
         veri = []
+    elif uc == "mazbata_bagla":
+        MZ_POST.append(json.loads(route.request.post_data or "{}"))
+        veri = {"degisen": 1}
     else:
         veri = {}
     route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "veri": veri}))
@@ -608,17 +613,41 @@ with sync_playwright() as p:
     s.locator("#cu-icra tbody.tik").first.locator("td").first.click(); bekle(s, 600)
     panel = s.locator("#cu-icra .i-panel")
     assert panel.count() == 1 and "2026/101" in panel.inner_text()
-    DI["sira"] = [gt_tarama(id="d1", mod="dosya", asama="tebligat", mesaj="İzmir 5. İcra Dairesi 2026/101: tebligatlar alınıyor…"),
-                  gt_tarama(id="d1", mod="dosya", durum="bitti", asama="bitti", mesaj="İzmir 5. İcra Dairesi 2026/101 güncellendi: 2 tebligat (0 yeni, 1 durumu değişti).",
-                            rapor=["✔ Künye güncellendi: İzmir 5. İcra Dairesi 2026/101 (Açık)", "✔ Taraflar güncellendi."])]
-    panel.locator("button", has_text="Taraf ve tebligatları al").click(); bekle(s, 300)
-    assert DI["postlar"][-1] == {"dosya": 1, "taraf": True, "tebligat": True}, DI["postlar"][-1]
-    assert "Taraf ve tebligatlar alınıyor" in s.locator("#cu-icra .i-dosya-is").inner_text()
+    DI["sira"] = [gt_tarama(id="d1", mod="dosya", asama="tebligat", dosya_kesinlesme=True, mesaj="İzmir 5. İcra Dairesi 2026/101: tebligatlar alınıyor…"),
+                  gt_tarama(id="d1", mod="dosya", durum="bitti", asama="bitti", dosya_kesinlesme=True,
+                            mesaj="İzmir 5. İcra Dairesi 2026/101 güncellendi: 2 tebligat (0 yeni, 1 durumu değişti) — 1 borçlu kesinleştirilebilir.",
+                            rapor=["✔ Künye güncellendi: İzmir 5. İcra Dairesi 2026/101 (Açık)", "✔ Taraflar güncellendi.",
+                                   "✔ Kesinleşme UYAP'tan okundu: 0 borçlu UYAP'ta kesinleşmiş.",
+                                   "1 borçlu kesinleştirilebilir: talep göndermek için onayınız bekleniyor."],
+                            talep_adaylari=[{"bag": 11, "borclu": "AHMET YILMAZ", "grup": "kesinlestirilebilir", "grup_etiket": "Kesinleştirilebilir"}])]
+    panel.locator("button", has_text="Veritabanını güncelle").click(); bekle(s, 300)
+    assert DI["postlar"][-1] == {"dosya": 1, "taraf": True, "tebligat": True, "kesinlesme": True}, DI["postlar"][-1]
+    assert "Veritabanı güncelleniyor" in s.locator("#cu-icra .i-dosya-is").inner_text()
     assert s.locator("#cu-icra .i-dosya-guncelle").is_disabled(), "iş sürerken düğme kapalı"
     bekle(s, 3600)
     metin = s.locator("#cu-icra .i-dosya-is").inner_text()
-    assert "güncellendi: 2 tebligat" in metin and "Künye güncellendi" in metin, metin
+    assert "güncellendi: 2 tebligat" in metin and "Künye güncellendi" in metin and "Kesinleşme UYAP'tan okundu" in metin, metin
     assert not s.locator("#cu-icra .i-dosya-guncelle").is_disabled()
+    # Talep onay kutusu: onaysız hiçbir şey gönderilmez; kutu işaretleri seçimi değiştirir
+    talep = s.locator("#cu-icra .i-panel-talep")
+    assert talep.count() == 1 and "AHMET YILMAZ" in talep.inner_text() and "geri alınamaz" in talep.inner_text(), talep.inner_text()
+    onceki_gt = len(GT["postlar"])
+    gonder = talep.locator("button", has_text="E-imzala ve gönder")
+    assert "(1 borçlu)" in gonder.inner_text()
+    talep.locator("input[type=checkbox]").uncheck(); bekle(s, 100)
+    assert s.locator("#cu-icra .i-panel-talep button", has_text="E-imzala ve gönder").is_disabled(), "seçim yoksa gönderilmez"
+    s.locator("#cu-icra .i-panel-talep input[type=checkbox]").check(); bekle(s, 100)
+    assert len(GT["postlar"]) == onceki_gt, "onaysız gönderilmez"
+    s.screenshot(path=os.path.join(CIKTI, "icra11_panel_talep.png"))
+    s.locator("#cu-icra .i-panel-talep button", has_text="E-imzala ve gönder").click(); bekle(s, 500)
+    assert GT["postlar"][-1] == ("", {"mod": "kesinlestirme_talebi", "dosyalar": [1], "borclular": [11]}), GT["postlar"][-1]
+    assert "Talep işi başladı" in s.locator("#cu-icra .i-panel-talep").inner_text()
+    GT["son"] = gt_tarama(mod="kesinlestirme_talebi", durum="bitti", asama="bitti", mesaj="Tamamlandı: 1 kesinleştirme talebi gönderildi.")
+    bekle(s, 2600)
+    gt_panel = s.locator("#cu-icra .i-gt:not(.i-dosya-is)")
+    assert "1 kesinleştirme talebi gönderildi" in gt_panel.inner_text(), gt_panel.inner_text()
+    gt_panel.locator("button", has_text="Kapat").click(); bekle(s, 200)
+    assert s.locator("#cu-icra .i-gt:not(.i-dosya-is)").count() == 0
     s.locator("#cu-icra .i-panel .i-sekmeler button", has_text="Tebligatlar").click(); bekle(s, 200)
     secili = s.locator("#cu-icra .i-panel button", has_text="Seçilenleri sorgula")
     assert secili.is_disabled() and "(0)" in secili.inner_text()
@@ -629,6 +658,71 @@ with sync_playwright() as p:
     assert DI["postlar"][-1] == {"dosya": 1, "taraf": False, "tebligat": True, "evraklar": [5]}, DI["postlar"][-1]
     s.screenshot(path=os.path.join(CIKTI, "icra11_dosya_guncelle.png"))
     s.locator("#cu-icra .i-dosya-is button", has_text="Durdur").click(); bekle(s, 600)
+    s.evaluate("() => { window.__uyapSagMenuAc = function(x, y, g) { window.__menu = g; window.__menuMetin = g.map(function(gr) { return gr.map(function(m) { return [m[0], !!m[1]]; }); }); }; }")
+    s.locator("#cu-icra .i-panel .i-sekmeler button", has_text="Tebligatlar").click(); bekle(s, 200)
+    assert s.locator("#cu-icra .i-panel .bolum", has_text="Mazbata evrakları (1)").count() == 1
+    s.locator("#cu-icra .i-panel .i-kart", has_text="Ödeme Emri").first.click(button="right"); bekle(s, 100)
+    menu = s.evaluate("window.__menuMetin")
+    assert menu[0][0] == ["Mazbata bağla · 4007663500001", False] and menu[0][1] == ["Kapalı Tebliğ Mazbatası · 20/10/2026", True], menu
+    assert len(menu) == 1, "elle bağ yokken 'kaldır' yok"
+    # Bağlanınca panel yeniden okunur (sunucu artık bağı döndürür)
+    DOSYA["mazbatalar"][0]["elle_tebligat"] = 5
+    DOSYA["tebligatlar"][0].update(mazbata_var=True, mazbata="Elle bağlandı: Kapalı Tebliğ Mazbatası (evrak 9, 20.10.2026)", mazbata_elle=True)
+    s.evaluate("window.__menu[0][1][1]()"); bekle(s, 600)
+    assert MZ_POST[-1] == {"dosya": 1, "tebligat": 5, "mazbata": 9}, MZ_POST
+    assert "Elle bağlandı: Kapalı Tebliğ Mazbatası" in s.locator("#cu-icra .i-panel .i-kart", has_text="Ödeme Emri").first.inner_text()
+    # Mazbata kartından: tebligat listesi; elle bağlıysa "Elle bağı kaldır"
+    mkart = s.locator("#cu-icra .i-panel .i-mazbata")
+    assert "Ödeme Emri · 4007663500001" in mkart.inner_text(), mkart.inner_text()
+    mkart.click(button="right"); bekle(s, 100)
+    menu = s.evaluate("window.__menuMetin")
+    assert [m[0] for m in menu[0][1:]] == ["103 Davetiyesi · 4007663500002 · BORÇLU AHMET YILMAZ · 03/10/2026"] and menu[1] == [["Elle bağı kaldır", True]], menu
+    s.evaluate("window.__menu[1][0][1]()"); bekle(s, 400)
+    assert MZ_POST[-1] == {"dosya": 1, "tebligat": 5, "mazbata": None}, MZ_POST
+    s.screenshot(path=os.path.join(CIKTI, "icra11_mazbata_bagi.png"))
+    DOSYA["mazbatalar"][0]["elle_tebligat"] = None
+    DOSYA["tebligatlar"][0].update(mazbata_var=False, mazbata="", mazbata_elle=False)
+    # Borçlu kartı: Mernis bilgisi + sağ tık (Mernis sorgusu / ücretli yeniden tebliğ, onay kutusuyla)
+    DOSYA["taraflar"] = [{"bag": 11, "rol": "borclu", "rol_etiket": "Borçlu", "ad": "AHMET YILMAZ", "tuzel": False, "kimlik": "11111111110",
+                          "uyapta_gorulmedi": False, "vekiller": "", "asama": "teblig", "asama_metni": "Tebliğ", "kesinlesme_durumu": "",
+                          "kesinlesme": "—", "tebligat": "İade (06.10.2026)", "teblig_kodu": "iade", "itiraz": False, "itiraz_tarihi": None,
+                          "kesinlesme_elle_tarihi": None,
+                          "mernis": {"kategori": "uygun", "etiket": "21/2 şerhli tebliğe uygun", "adres": "BOSTANLI MAH. 1720 SK. No:5 KARŞIYAKA/ İZMİR",
+                                     "teblig_adresi": "Bostanlı Mah. 1720 Sk. No:5 Karşıyaka/ İzmir", "aciklama": "Ödeme emri Mernis adresine çıkmış, iade dönmüş",
+                                     "zaman": "23.11.2026 19:05", "talep_turu": "T.K.21/2 Şerhli", "tutar": 265}}]
+    s.locator("#cu-icra .i-panel .i-sekmeler button", has_text="Borçlular").click(); bekle(s, 150)
+    s.locator("#cu-icra .i-panel button[aria-label='Paneli kapat']").click(); bekle(s, 200)
+    s.locator("#cu-icra tbody.tik").first.locator("td").first.click(); bekle(s, 600)
+    s.locator("#cu-icra .i-panel .i-sekmeler button", has_text="Borçlular").click(); bekle(s, 200)
+    kart = s.locator("#cu-icra .i-panel .i-borclu")
+    assert "21/2 şerhli tebliğe uygun" in kart.inner_text() and "Mernis adresi: BOSTANLI MAH." in kart.inner_text(), kart.inner_text()
+    assert s.locator("#cu-icra .i-panel button", has_text="Tebligatları güncelle").count() == 1
+    kart.click(button="right"); bekle(s, 100)
+    menu = s.evaluate("window.__menuMetin")
+    assert menu[1][0] == ["Mernis adresini yeniden sorgula (son: 23.11.2026 19:05)", True], menu
+    assert menu[2][0] == ["Yeniden tebliğ talebi gönder — T.K.21/2 Şerhli (≈ 265 TL)…", True], menu
+    onceki_gt = len(GT["postlar"])
+    s.evaluate("window.__menu[2][0][1]()"); bekle(s, 300)
+    onay = s.locator("#cu-icra .i-yt-onay")
+    assert onay.count() == 1 and "ÜCRETLİDİR" in onay.inner_text() and "İlk tebligat adresi: Bostanlı" in onay.inner_text(), onay.inner_text()
+    assert onay.locator("button", has_text="E-imzala ve gönder").is_disabled() and len(GT["postlar"]) == onceki_gt, "onaysız gönderilmez"
+    s.screenshot(path=os.path.join(CIKTI, "icra11_yeniden_teblig_panel.png"))
+    onay.locator("input[type=checkbox]").check(); bekle(s, 150)
+    s.locator("#cu-icra .i-yt-onay button", has_text="E-imzala ve gönder").click(); bekle(s, 500)
+    assert GT["postlar"][-1] == ("", {"mod": "yeniden_teblig", "dosyalar": [1], "borclular": [11]}), GT["postlar"][-1]
+    assert s.locator("#cu-icra .i-yt-onay").count() == 0
+    GT["son"] = gt_tarama(mod="yeniden_teblig", durum="bitti", asama="bitti", mesaj="Tamamlandı: 1 yeniden tebliğ talebi gönderildi (≈ 265 TL).")
+    bekle(s, 2600)
+    # Mernis (yeniden) sorgusu menüden doğrudan başlar (salt okuma)
+    s.locator("#cu-icra .i-panel .i-borclu").click(button="right"); bekle(s, 100)
+    s.evaluate("window.__menu[1][0][1]()"); bekle(s, 500)
+    assert GT["postlar"][-1] == ("", {"mod": "mernis", "dosyalar": [1], "borclular": [11], "yeniden": True}), GT["postlar"][-1]
+    GT["son"] = gt_tarama(mod="mernis", durum="bitti", asama="bitti", mesaj="Tamamlandı: 1 borçlunun Mernis adresi alındı.")
+    bekle(s, 2600)
+    gt_panel = s.locator("#cu-icra .i-gt:not(.i-dosya-is)")
+    if gt_panel.count():
+        gt_panel.locator("button", has_text="Kapat").click(); bekle(s, 200)
+    DOSYA["taraflar"] = []
     # Dosya sekmesi: takip türü, yolu, şekli adlarıyla (kod gösterilmez)
     DOSYA["takip"] = {"okundu": True, "turu": "1", "yolu": "0", "sekli": "0", "turu_ad": "İlamsız Takip", "yolu_ad": "Genel Haciz Yoluyla Takip",
                       "sekli_ad": "ÖRNEK: 7 İlamsız Takiplerde Ödeme Emri - Eski No: 49", "ornek_no": "7", "okunma": "2026-11-19 14:05",

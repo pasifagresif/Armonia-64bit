@@ -63,6 +63,7 @@ pub fn dosya_baglami<C: GenericClient>(c: &mut C, dosya: i64, evraklar: &[Value]
         talep |= s.get::<_, bool>(3);
     }
     let mut mazbatalar = Mazbatalar::kur(evraklar);
+    mazbatalar.elle_bagla(&kayit::elle_mazbata_baglari(c, dosya)?, evraklar);
     mazbatalar.barkodlulari_dus(dosya_barkodlari.iter().map(|(b, (no, _))| (b, *no)));
     Ok(DosyaBaglami {
         dosya,
@@ -75,6 +76,50 @@ pub fn dosya_baglami<C: GenericClient>(c: &mut C, dosya: i64, evraklar: &[Value]
         mts_mukerrer: kayit::mts_mukerrerler(c)?,
         dosya_barkodlari,
     })
+}
+
+/// Kayıtlı evrak listesinden (UYAP'a gitmeden) dosyanın bütün tebligatlarının mazbata eşleşmesini yeniden kurar
+/// ve durumları yeniden hesaplar. Elle mazbata bağı kurulunca / kaldırılınca çağrılır. Döner: değişen tebligat sayısı.
+pub fn mazbatalari_yeniden_bagla<C: GenericClient>(c: &mut C, dosya: i64, bugun: chrono::NaiveDate) -> Result<usize, String> {
+    let hata = |e: postgres::Error| format!("veritabanı: {e}");
+    let evraklar: Vec<Value> = c
+        .query(
+            "SELECT birim_evrak_no, evrak_turu, aciklama, COALESCE(to_char(evrak_tarihi, 'DD/MM/YYYY'), '') FROM evrak
+              WHERE dosya_id = $1 ORDER BY birim_evrak_no",
+            &[&dosya],
+        )
+        .map_err(hata)?
+        .iter()
+        .map(|s| {
+            serde_json::json!({"birimEvrakNo": s.get::<_, i32>(0), "tur": s.get::<_, String>(1), "aciklama": s.get::<_, String>(2),
+                               "onaylandigiTarih": s.get::<_, String>(3)})
+        })
+        .collect();
+    let tebligatlar: Vec<(i64, i32, String)> = c
+        .query("SELECT id, birim_evrak_no, barkod FROM tebligat_barkod WHERE dosya_id = $1 ORDER BY id", &[&dosya])
+        .map_err(hata)?
+        .iter()
+        .map(|s| (s.get(0), s.get(1), s.get(2)))
+        .collect();
+    let mut m = Mazbatalar::kur(&evraklar);
+    m.elle_bagla(&kayit::elle_mazbata_baglari(c, dosya)?, &evraklar);
+    let bilinen: Vec<(String, i32)> = tebligatlar.iter().filter(|t| !t.2.is_empty()).map(|t| (t.2.clone(), t.1)).collect();
+    m.barkodlulari_dus(bilinen.iter().map(|(b, no)| (b, *no)));
+    let mut n = 0;
+    for (id, no, barkod) in &tebligatlar {
+        let mz = m.bul(barkod, *no);
+        // Elle işlenmiş e-tebliğ mazbatası ("Kapalı E-Tebliğ Mazbatası …") evrak listesinde görünmez; silinmez (kayit ile aynı kural).
+        n += c
+            .execute(
+                "UPDATE tebligat_barkod SET tebligat_mazbatasi_var = $2, tebligat_mazbatasi_aciklama = $3
+                  WHERE id = $1 AND (tebligat_mazbatasi_var, tebligat_mazbatasi_aciklama) IS DISTINCT FROM ($2, $3)
+                    AND NOT (NOT $2 AND tebligat_mazbatasi_var AND tebligat_mazbatasi_aciklama LIKE 'Kapalı E-Tebliğ Mazbatası%')",
+                &[id, &mz.is_some(), &mz.clone().unwrap_or_default()],
+            )
+            .map_err(hata)? as usize;
+    }
+    durum::durumlari_guncelle(c, Some(dosya), bugun, &|_: &str| {})?;
+    Ok(n)
 }
 
 /// Bir tebligat evrakı için yazılmaya hazır sonuç.
@@ -156,6 +201,11 @@ pub fn evrak_baslat<C: GenericClient>(c: &mut C, ctx: &DosyaBaglami, evrak: &Val
     else {
         return Ok(Adim::PdfGerek);
     };
+    // Zarf adresi (23.11.2026'dan önce okunmuyordu): kesinleşmeye giren türde fiziki tebligatın adresi yoksa PDF bir kez
+    // daha indirilir (Mernis kıyası için).
+    if !b.elektronik_tebligat && b.teblig_adresi.is_empty() && tarih_gerekli(&b.tebligat_turu) {
+        return Ok(Adim::PdfGerek);
+    }
     // Barkod ve tür biliniyor: PDF yeniden indirilmez.
     let mut tur = b.tebligat_turu.clone();
     if !teb::TEMEL_TURLER.contains(&tur.as_str()) {
@@ -249,6 +299,12 @@ pub fn pdf_geldi<C: GenericClient>(
     let mut t = taslak(ctx, evrak, no, &barkod, elektronik, tur);
     t.kayit.zarf_icerigi = teb::zarf_icerigi_oku(&govde).unwrap_or_default();
     t.kayit.haciz_sirasi = teb::haciz_sirasi_bul(&govde);
+    if !elektronik {
+        // Okunamazsa "-": PDF her taramada yeniden indirilmesin.
+        t.kayit.teblig_adresi = crate::icra_mernis::zarf_adres_blogu(&govde)
+            .map(|a| crate::icra_veri::kirp(&a, 2000))
+            .unwrap_or_else(|| crate::icra_mernis::ADRES_OKUNAMADI.to_string());
+    }
     if elektronik {
         e_teblig(&mut t, &teb::metin(evrak, "onaylandigiTarih"));
         return Ok(Adim::Kaydet(t));
@@ -524,6 +580,61 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     let (pdf_n, ptt_n, atlanan) = ornekle_isle(c, d2, &mts, &|_| panic!("PDF indirilmemeli"), &mts_ptt, true);
     assert_eq!((pdf_n, ptt_n, atlanan.len()), (0, 1, 1), "mükerrer evrak sonraki turda atlanır");
     assert_eq!(say(c, "SELECT count(*) FROM tebligat_barkod WHERE dosya_id <> 0 AND barkod = '4100131175175'"), 1);
+
+    // ── Elle mazbata bağı (sağ tık): iki fiziki tebligat, barkodsuz iki mazbata → otomatik bağ yok; elle bağ kalıcı ──
+    let (d9, _) = dosya_kunyesi_kaydet(c, &kunye("2026/9", 1001), Some(YargiTuru::Icra.kod())).unwrap();
+    let ev9 = vec![
+        json!({"birimEvrakNo": 10, "tur": teb::HEDEF_TUR, "aciklama": "Normal Tebligat[AHMET YILMAZ]", "onaylandigiTarih": "01/10/2026"}),
+        json!({"birimEvrakNo": 11, "tur": teb::HEDEF_TUR, "aciklama": "Normal Tebligat[FATMA BİROLOĞLU]", "onaylandigiTarih": "01/10/2026"}),
+        json!({"birimEvrakNo": 12, "tur": teb::HEDEF_TUR, "aciklama": "Elektronik Tebligat[X BANKASI]", "onaylandigiTarih": "01/10/2026"}),
+        json!({"birimEvrakNo": 13, "tur": teb::TEBLIG_MAZBATASI_TUR, "aciklama": "", "onaylandigiTarih": "20/10/2026"}),
+        json!({"birimEvrakNo": 14, "tur": teb::KAPALI_TEBLIG_MAZBATASI_TUR, "aciklama": "", "onaylandigiTarih": "21/10/2026"}),
+    ];
+    kayit::evrak_listesi_kaydet(c, d9, &ev9).unwrap();
+    for (no, barkod, e) in [(10, "40011", false), (11, "40012", false), (12, "50013", true)] {
+        c.execute("INSERT INTO tebligat_barkod (dosya_id, birim_evrak_no, barkod, elektronik_tebligat, tebligat_turu) VALUES ($1, $2, $3, $4, 'Ödeme Emri')",
+                  &[&d9, &no, &barkod, &e]).unwrap();
+    }
+    let gun = NaiveDate::from_ymd_opt(2026, 11, 23).unwrap();
+    let mz = |c: &mut postgres::Client, no: i32| -> (bool, String) {
+        let s = c.query_one("SELECT tebligat_mazbatasi_var, tebligat_mazbatasi_aciklama FROM tebligat_barkod WHERE dosya_id = $1 AND birim_evrak_no = $2", &[&d9, &no]).unwrap();
+        (s.get(0), s.get(1))
+    };
+    mazbatalari_yeniden_bagla(c, d9, gun).unwrap();
+    assert_eq!((mz(c, 10).0, mz(c, 11).0), (false, false), "iki aday: tahmin yok");
+    crate::icra_api::mazbata_bagla(c, d9, 10, Some(13), gun).unwrap();
+    let (v, a) = mz(c, 10);
+    assert!(v && a.starts_with("Elle bağlandı: Tebliğ Mazbatası (evrak 13, 20.10.2026"), "{a}");
+    assert!(teb::kendi_mazbatasi_dondu_mu("40011", v, &a), "elle bağ hesapta sayılır");
+    assert!(!mz(c, 11).0);
+    // Taramada da elle bağ geçerli (bağlam kayıtlı bağı okur); bağlanan mazbata başka tebligata aday olmaz.
+    let ctx = dosya_baglami(c, d9, &ev9).unwrap();
+    assert!(ctx.mazbatalar.bul("40011", 10).unwrap().starts_with("Elle bağlandı"));
+    assert_eq!(ctx.mazbatalar.bul("40012", 11), None);
+    crate::icra_api::mazbata_bagla(c, d9, 11, Some(14), gun).unwrap();
+    assert!(mz(c, 11).1.contains("Kapalı Tebliğ Mazbatası (evrak 14"));
+    // Mazbata başka tebligata taşınınca eski bağlar düşer.
+    crate::icra_api::mazbata_bagla(c, d9, 11, Some(13), gun).unwrap();
+    assert_eq!((mz(c, 10).0, mz(c, 11).1.contains("evrak 13")), (false, true));
+    assert_eq!(say(c, "SELECT count(*) FROM tebligat_mazbata_bagi"), 1);
+    // Bağ kaldırılınca otomatik eşleşmeye döner (iki aday: bağ yok).
+    crate::icra_api::mazbata_bagla(c, d9, 11, None, gun).unwrap();
+    assert_eq!((mz(c, 11).0, say(c, "SELECT count(*) FROM tebligat_mazbata_bagi")), (false, 0));
+    assert!(crate::icra_api::mazbata_bagla(c, d9, 12, Some(13), gun).unwrap_err().contains("E-tebligat"));
+    assert!(crate::icra_api::mazbata_bagla(c, d9, 10, Some(12), gun).unwrap_err().contains("Mazbata evrakı"));
+    // UYAP dosya penceresinden sağ tık: taramanın görmediği yeni mazbata veritabanına yazılır; seçenek yalnız PTT tebligatları.
+    let yeni = json!({"evrakId": "x", "birimEvrakNo": 15, "tur": teb::TEBLIG_MAZBATASI_TUR, "aciklama": "", "onaylandigiTarih": "22/10/2026 10:00"});
+    let s = crate::icra_api::mazbata_bag_secenekleri(c, d9, &yeni).unwrap();
+    assert_eq!((s["mazbata"]["evrak_no"].as_i64(), s["mazbata"]["evrak_tarihi"].as_str()), (Some(15), Some("22/10/2026")));
+    let nolar: Vec<i64> = s["tebligatlar"].as_array().unwrap().iter().map(|t| t["evrak_no"].as_i64().unwrap()).collect();
+    assert_eq!(nolar.len(), 2);
+    assert!(!nolar.contains(&12), "e-tebligat seçenek değil");
+    crate::icra_api::mazbata_bagla(c, d9, 11, Some(15), gun).unwrap();
+    let s = crate::icra_api::mazbata_bag_secenekleri(c, d9, &yeni).unwrap();
+    assert_eq!(s["mazbata"]["elle_tebligat"].as_i64(), Some(11));
+    let yanlis = json!({"birimEvrakNo": 16, "tur": teb::HEDEF_TUR});
+    assert!(crate::icra_api::mazbata_bag_secenekleri(c, d9, &yanlis).unwrap_err().contains("mazbata türü değil"));
+    crate::icra_api::mazbata_bagla(c, d9, 11, None, gun).unwrap();
 
     c.batch_execute("DELETE FROM dosya; DELETE FROM taraf; DELETE FROM vekil; DELETE FROM birim; DELETE FROM buro_ayar WHERE anahtar = 'mts_mukerrer'")
         .unwrap();

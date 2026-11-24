@@ -4021,7 +4021,13 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         const j = await r.json();
         const kayitlar = Array.isArray(j) && Array.isArray(j[0]) ? j[0] : (Array.isArray(j) ? j : []);
         return kayitlar.find(function(k) {
-            return k && String(k.birimId) === String(dosya.birimId) && String(k.dosyaNo).trim() === m[1] + '/' + m[2];
+            // Yenilenen dosyada UYAP numarayı "2026/5683 - ( 2022/11833 )" verir (yeni esas no önde, eskisi parantezde):
+            // birebir karşılaştırma tutmuyor, dosya "bulunamadı" deniyordu (kullanıcı bulgusu 23.11.2026). Arama kayıttaki
+            // ilk yıl/sıra ile (yeni esas no) yapılır; sonuçtaki numaraların herhangi biri tutarsa eşleşir. Böylece
+            // veritabanında yalnız eski numara varsa da (yenilemeden sonra henüz taranmadı) parantezdeki eski no sayılır.
+            if (!k || String(k.birimId) !== String(dosya.birimId)) return false;
+            const nolar = String(k.dosyaNo || '').match(/\d{4}\s*\/\s*\d+/g) || [];
+            return nolar.some(function(x) { const n = /(\d{4})\s*\/\s*(\d+)/.exec(x); return Number(n[1]) === Number(m[1]) && Number(n[2]) === Number(m[2]); });
         }) || null;
     }
     async function bt2Adaylari(dosya) {
@@ -5291,6 +5297,156 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         if (barkod) g.push(['Barkod sorgula', function() { pttSorgula(barkod); }]);
         return g.length > 1 ? [g] : null;
     }
+    // ── Mazbata ↔ tebligat elle bağı (fiziki mazbata çoğu zaman barkodsuz fotoğraf olarak taranır) ──
+    // Evrak ağacında mazbata satırına ya da görüntüleyicide açık mazbataya sağ tık → "Tebligata bağla…". Tür UYAP'ın
+    // evrak verisinden okunur (yazıdan değil); sunucudaki BAGLANABILIR_MAZBATALAR ile aynı liste.
+    const BAGLANABILIR_MAZBATALAR = ['Tebliğ Mazbatası', 'PTT MTS Tebliğ Mazbatası', 'Kapalı Tebliğ Mazbatası'];
+    function mazbataDugumu(h) {
+        const kart = h.closest('.dosya-sorgula-popup');
+        const A = window.__uyapEvrakAgaci;
+        const tv = kart && A && kart.querySelector('.evrak-treeview');
+        if (!tv) return null;
+        let node = null;
+        if (h.closest('.evrak-treeview')) node = h.closest('.dx-treeview-node');
+        else if (goruntuleyiciKoku(h, kart)) node = tv.querySelector('.dx-treeview-node.dx-state-selected');
+        const koklar = node && A.veri(tv);
+        const g = koklar ? A.harita(koklar)[node.getAttribute('data-item-id')] : null;
+        const e = g && !g.x.isEkEvrak ? g.x.evrak : null;
+        if (!e || BAGLANABILIR_MAZBATALAR.indexOf(String(e.tur || '').trim()) < 0 || !(parseInt(e.birimEvrakNo, 10) > 0)) return null;
+        return { kart: kart, evrak: e };
+    }
+    function mazbataBagMenusu(h) {
+        const m = mazbataDugumu(h);
+        const d = m && window.__uyapKartVerisi ? window.__uyapKartVerisi(m.kart) : null;
+        if (!d || !d.birimId || !d.dosyaNo) return null;
+        const tarih = String(m.evrak.onaylandigiTarih || '').slice(0, 10);
+        return [[['Tebligata bağla… · ' + String(m.evrak.tur).trim() + (tarih ? ' ' + tarih : ''), function() { mazbataBagPenceresi(d, m.evrak); }]]];
+    }
+    async function veriPost(uc, govde) {
+        const r = await window.fetch('/__cu__/veri/' + uc, { method: 'POST', cache: 'no-store', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(govde) });
+        let j = null;
+        try { j = await r.json(); } catch (e) {}
+        if (!j) throw new Error('Ofis bilgisayarından beklenmeyen yanıt (HTTP ' + r.status + '). Program güncel olmayabilir.');
+        if (j.ok === false || j.error || j.detail) throw new Error(j.error || j.detail || 'İşlem yapılamadı.');
+        return j.veri !== undefined ? j.veri : j;
+    }
+    async function mazbataBagPenceresi(d, evrak) {
+        kur();
+        kutu.innerHTML = '';
+        ort.style.display = 'flex';
+        const tur = String(evrak.tur || 'Mazbata').trim();
+        const tarih = String(evrak.onaylandigiTarih || '').slice(0, 10);
+        const ust = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:8px;');
+        ust.appendChild(el('div', 'font-size:14px;font-weight:700;', 'Mazbatayı tebligata bağla'));
+        const x = el('span', 'font-size:18px;color:#9ca3af;cursor:pointer;padding:0 4px;', '×');
+        x.addEventListener('click', kapat);
+        ust.appendChild(x);
+        kutu.appendChild(ust);
+        kutu.appendChild(el('div', 'margin-top:2px;color:#9ca3af;', [tur, tarih, 'evrak ' + evrak.birimEvrakNo].filter(Boolean).join(' · ')));
+        const govde = el('div', 'margin-top:10px;color:#cbd5e1;', 'Tebligatlar alınıyor…');
+        kutu.appendChild(govde);
+        const hata = function(e) { govde.replaceChildren(el('div', 'color:#fca5a5;word-break:break-word;', e.message), dugme('Kapat', 'rgba(255,255,255,0.15)', kapat)); };
+        const etiket = function(t) {
+            const ptt = !t.ptt_durumu ? 'PTT sorgulanmadı'
+                : (mzTeslim(t) ? 'Teslim edildi' : t.ptt_durumu) + (t.son_islem_tarihi ? ' ' + String(t.son_islem_tarihi).slice(0, 10) : '');
+            return [t.evrak_tarihi ? String(t.evrak_tarihi).slice(0, 10) : '', t.tur || 'Tebligat', t.muhatap, t.barkod || 'barkodsuz', ptt,
+                    t.mazbata_var ? 'mazbata döndü' : 'mazbata dönmedi'].filter(Boolean).join(' · ');
+        };
+        let j;
+        try {
+            j = await veriPost('mazbata_bag_secenek', { birim_id: String(d.birimId || ''), dosya_no: String(d.dosyaNo || ''),
+                dosya_tur_kod: d.dosyaTurKod != null ? Number(d.dosyaTurKod) : null,
+                evrak: { birimEvrakNo: parseInt(evrak.birimEvrakNo, 10), tur: tur, aciklama: String(evrak.aciklama || ''),
+                         onaylandigiTarih: String(evrak.onaylandigiTarih || '') } });
+        } catch (e) { hata(e); return; }
+        const m = j.mazbata || {};
+        const mzNo = parseInt(evrak.birimEvrakNo, 10);
+        const bagla = async function(tebligat, mazbata, tebligTarihi, sonra) {
+            govde.replaceChildren(el('div', '', 'Kaydediliyor…'));
+            try { await veriPost('mazbata_bagla', { dosya: j.dosya, tebligat: tebligat, mazbata: mazbata, teblig_tarihi: tebligTarihi || null }); }
+            catch (e) { hata(e); return; }
+            govde.replaceChildren(el('div', 'color:#86efac;font-weight:600;', sonra),
+                el('div', 'margin-top:4px;', 'Tebliğ durumu ve kesinleşme yeniden hesaplandı.'), dugme('Kapat', 'rgba(255,255,255,0.15)', kapat));
+        };
+        // Tebliğ günü PTT'de yoksa (eski barkod PTT'den silinir) mazbatadaki tarih sorulur; boş bırakılabilir.
+        const tarihleBagla = function(t) {
+            if (mzTebligGunuVar(t)) { bagla(t.evrak_no, mzNo, null, 'Mazbata bağlandı: ' + etiket(t)); return; }
+            const giris = el('input', 'width:auto;margin:0 0 0 8px;');
+            giris.type = 'date';
+            const ust = mzIsoGun(evrak.onaylandigiTarih) || new Date().toISOString().slice(0, 10);
+            giris.max = ust;
+            if (mzIsoGun(t.evrak_tarihi)) giris.min = mzIsoGun(t.evrak_tarihi);
+            if (m.elle_tebligat === t.evrak_no && m.teblig_tarihi) giris.value = mzIsoGun(m.teblig_tarihi);
+            const satir = el('label', 'display:flex;align-items:center;margin-top:10px;', 'Tebliğ tarihi');
+            satir.appendChild(giris);
+            govde.replaceChildren(el('div', 'font-weight:600;', etiket(t)),
+                el('div', 'margin-top:6px;color:#fde68a;', 'Bu tebligatın tebliğ günü PTT\'de yok (eski barkodlar PTT\'nin sisteminden silinir). '
+                    + 'Mazbatada yazan tebliğ tarihini girerseniz kesinleşme bu günden hesaplanır.'), satir,
+                dugme('Bağla', 'var(--cu-vurgu)', function() {
+                    if (!giris.value) { giris.focus(); return; }
+                    bagla(t.evrak_no, mzNo, giris.value, 'Mazbata bağlandı: ' + etiket(t) + ' · tebliğ ' + giris.value.split('-').reverse().join('.'));
+                }),
+                dugme('Tarihsiz bağla', 'rgba(255,255,255,0.12)', function() { bagla(t.evrak_no, mzNo, null, 'Mazbata bağlandı: ' + etiket(t)); }),
+                dugme('Geri', 'rgba(255,255,255,0.15)', ciz));
+            giris.focus();
+        };
+        const tebs = j.tebligatlar || [];
+        const ciz = function() {
+            govde.innerHTML = '';
+            const bagli = m.elle_tebligat ? tebs.find(function(t) { return t.evrak_no === m.elle_tebligat; }) : null;
+            govde.appendChild(el('div', '', m.elle_tebligat ? 'Şu an elle bağlı: ' + (bagli ? etiket(bagli) : 'evrak ' + m.elle_tebligat)
+                + (m.teblig_tarihi ? ' · mazbatadaki tebliğ tarihi ' + m.teblig_tarihi : '') : 'Elle bağ yok (barkod ve tarihle otomatik eşleşme geçerli).'));
+            const a = mzAdaylari({ evrak_tarihi: evrak.onaylandigiTarih, elle_tebligat: m.elle_tebligat }, tebs);
+            if (!a.liste.length) {
+                govde.appendChild(el('div', 'margin-top:6px;color:#fde68a;', tebs.length ? 'Bu mazbatadan önce giden PTT tebligatı yok.'
+                    : 'Dosyada PTT ile giden tebligat kaydı yok. Önce İcra Süreçleri\'nden dosyanın tebligatlarını güncelleyin.'));
+            } else {
+                govde.appendChild(el('div', 'margin-top:8px;font-weight:600;', 'Bu mazbata hangi tebligatın?'));
+                a.liste.forEach(function(t) {
+                    const secili = t.evrak_no === m.elle_tebligat;
+                    const b = dugme((t === a.onerilen ? '★ Önerilen: ' : '') + etiket(t) + (secili ? '  ✓' : ''),
+                        secili || t === a.onerilen ? 'var(--cu-vurgu)' : 'rgba(255,255,255,0.12)', function() { tarihleBagla(t); });
+                    b.style.display = 'block';
+                    b.style.textAlign = 'left';
+                    b.style.margin = '6px 0 0';
+                    if (t.mazbata_var && t.mazbata && !secili) b.title = 'Bu tebligatın şu anki mazbatası: ' + t.mazbata;
+                    govde.appendChild(b);
+                });
+                if (a.elenen) govde.appendChild(el('div', 'margin-top:6px;color:#9ca3af;', a.elenen + ' tebligat mazbatadan sonra gittiği için listelenmedi.'));
+            }
+            if (bagli && !mzTebligGunuVar(bagli)) govde.appendChild(dugme(m.teblig_tarihi ? 'Tebliğ tarihini değiştir' : 'Mazbatadaki tebliğ tarihini gir',
+                'rgba(255,255,255,0.12)', function() { tarihleBagla(bagli); }));
+            if (m.elle_tebligat) govde.appendChild(dugme('Elle bağı kaldır', 'rgba(239,68,68,0.55)',
+                function() { bagla(m.elle_tebligat, null, null, 'Elle bağ kaldırıldı; otomatik eşleşmeye dönüldü.'); }));
+            govde.appendChild(dugme('Kapat', 'rgba(255,255,255,0.15)', kapat));
+        };
+        ciz();
+    }
+    // Aynı kurallar icra.js'te (mazbataAdaylari, tebligGunuVar): mazbata kendi tebligatından önce dönemez; önerilen,
+    // teslim edilmiş ve mazbatası dönmemiş, teslim günü mazbataya en yakın tebligat.
+    function mzGun(s) {
+        let m = /^(\d{2})[\/.](\d{2})[\/.](\d{4})/.exec(String(s || '').trim());
+        if (m) return +(m[3] + m[2] + m[1]);
+        m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || '').trim());
+        return m ? +(m[1] + m[2] + m[3]) : 0;
+    }
+    function mzIsoGun(s) { const n = mzGun(s); return n ? String(n).replace(/^(\d{4})(\d{2})(\d{2})$/, '$1-$2-$3') : ''; }
+    function mzTeslim(t) { return String(t.ptt_durumu || '').toLocaleLowerCase('tr-TR').indexOf('teslim edildi') >= 0; }
+    function mzTebligGunuVar(t) { return mzTeslim(t) && !!mzGun(t.son_islem_tarihi); }
+    function mzAdaylari(m, fiziki) {
+        const mg = mzGun(m.evrak_tarihi);
+        const uygun = fiziki.filter(function(t) { const tg = mzGun(t.evrak_tarihi); return !mg || !tg || tg <= mg; });
+        const serbest = function(t) { return !t.mazbata_var || t.evrak_no === m.elle_tebligat; };
+        const puan = function(t) {
+            const sg = mzGun(t.son_islem_tarihi);
+            if (mzTeslim(t) && serbest(t) && sg && (!mg || sg <= mg)) return 3e8 + sg;
+            if (serbest(t)) return 1e8 + mzGun(t.evrak_tarihi);
+            return mzGun(t.evrak_tarihi);
+        };
+        const liste = uygun.slice().sort(function(a, b) { return puan(b) - puan(a); });
+        return { liste: liste, onerilen: liste.length && puan(liste[0]) >= 1e8 ? liste[0] : null, elenen: fiziki.length - uygun.length };
+    }
     // "Mazbatayı tebligata işle": görüntülenen mazbatanın yazısı sunucuya gider (barkod, hesap sahibi, UETS olayları);
     // barkod → muhatap + gün → kullanıcı seçimi. UYAP'a istek yok.
     async function mazbataIsle(d, kok, ad, tarih, tebligatId) {
@@ -5589,6 +5745,9 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
     // ── Çoklu pano (16.11.2026): 10 göz (1–9, 0), arayüzün her yerinde ──
     // Ctrl+Shift+N: seçili metni (seçim yoksa son kopyalananı) N. göze kaydeder. Yazı alanında Ctrl+N: N. gözü
     // yapıştırır (Ctrl+V olağan panodur, dokunulmaz). Sağ tıkta "kaydet" ve "yapıştır" düğme sıraları.
+    // 23.11.2026: Chrome / Edge / Firefox Ctrl+1…9'u sekme geçişine ayırır, sayfa engelleyemez → Alt+N de yapıştırır
+    // (Alt+Shift+N kaydeder). Alt ile yalnız üst sıradaki rakamlar: sayısal tuş takımı Alt kodlarına (Alt+0199 = Ç)
+    // kalır. AltGr (Ctrl+Alt) hiç yakalanmaz: Türkçe klavyede # $ { [ ] } yazar.
     // Gözler yalnız bu tarayıcıda kalır (localStorage); hiçbir yere gönderilmez.
     const PANO_ANAHTAR = 'cuCokluPano', PANO_SIRA = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
     function panoOku() {
@@ -5606,7 +5765,7 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         const l = panoOku();
         l[i] = metin;
         panoYaz(l);
-        kisaBildirim('Pano ' + PANO_SIRA[i] + ': ' + panoOnizleme(metin) + ' — yapıştırmak için Ctrl+' + PANO_SIRA[i]);
+        kisaBildirim('Pano ' + PANO_SIRA[i] + ': ' + panoOnizleme(metin) + ' — yapıştırmak için Alt+' + PANO_SIRA[i]);
     }
     // Yazılabilir alan: metin kutusu, textarea, contenteditable (select / onay kutusu / sayı kutusu değil).
     function yaziAlani(e) {
@@ -5634,19 +5793,21 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
     }
     function panoYapistir(i, a) {
         const m = panoOku()[i];
-        if (!m) { kisaBildirim('Pano ' + PANO_SIRA[i] + ' boş (kaydetmek için metni seçip Ctrl+Shift+' + PANO_SIRA[i] + ').'); return; }
+        if (!m) { kisaBildirim('Pano ' + PANO_SIRA[i] + ' boş (kaydetmek için metni seçip Alt+Shift+' + PANO_SIRA[i] + ').'); return; }
         alanaYaz(a, m);
     }
+    // Armonia Yazı penceresi (enjekte/yazi.js) aynı gözleri editör çerçevesinde kullanır.
+    window.__uyapCokluPano = { oku: function() { return panoOku(); }, kaydet: function(i, m) { panoKaydet(i, m); } };
     function panoGruplari(alan, kaydedilecek, kaydetBasligi) {
         const l = panoOku(), g = [];
         if (kaydedilecek) {
-            g.push([kaydetBasligi || 'Çoklu panoya kaydet · Ctrl+Shift+1…0', null]);
+            g.push([kaydetBasligi || 'Çoklu panoya kaydet · Alt+Shift+1…0', null]);
             g.push({ sira: PANO_SIRA.map(function(n, i) {
                 return [n, function() { panoKaydet(i, kaydedilecek); }, n + ': ' + (l[i] ? panoOnizleme(l[i]) + ' (üzerine yazılır)' : 'boş'), !!l[i]];
             }) });
         }
         if (alan && l.some(Boolean)) {
-            g.push(['Çoklu panodan yapıştır · Ctrl+1…0', null]);
+            g.push(['Çoklu panodan yapıştır · Alt+1…0', null]);
             g.push({ sira: PANO_SIRA.map(function(n, i) {
                 return [n, l[i] ? function() { panoYapistir(i, alan); } : null, n + ': ' + (l[i] ? panoOnizleme(l[i]) : 'boş'), !!l[i]];
             }) });
@@ -5654,11 +5815,19 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         if (g.length && l.some(Boolean)) g.push(['Çoklu panoyu temizle', function() { panoYaz([]); kisaBildirim('Çoklu pano temizlendi.'); }]);
         return g.length ? [g] : [];
     }
+    // Ctrl+N / Alt+N (bkz. yukarı). Armonia Yazı penceresi aynı kuralı çerçevede uygular (panoTusu).
+    function panoKisayolu(ev) {
+        const ctrl = (ev.ctrlKey || ev.metaKey) && !ev.altKey;
+        const alt = ev.altKey && !ev.ctrlKey && !ev.metaKey;
+        if (!ctrl && !alt) return null;
+        const m = (alt ? /^Digit([0-9])$/ : /^(?:Digit|Numpad)([0-9])$/).exec(ev.code || '');
+        return m ? m[1] : null;
+    }
+    window.__uyapPanoKisayolu = panoKisayolu;
     window.addEventListener('keydown', function(ev) {
-        if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
-        const m = /^(?:Digit|Numpad)([0-9])$/.exec(ev.code || '');
-        if (!m) return;
-        const i = PANO_SIRA.indexOf(m[1]);
+        const n = panoKisayolu(ev);
+        if (!n) return;
+        const i = PANO_SIRA.indexOf(n);
         const ae = document.activeElement;
         if (ev.shiftKey) {
             const belge = sonBelgeHedefi && sonBelgeHedefi.isConnected ? belgeSecimi(sonBelgeHedefi) : '';
@@ -5720,6 +5889,10 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
                 kartG = tebG.concat(dosyaG || []);
             }
             if (!kartG) { try { kartG = sagMenuMaddeleri(h); } catch (e) {} }   // beklenmeyen sayfa yapısı: menüsüz
+            // Mazbata (evrak ağacındaki satır ya da görüntüleyicide açık belge): "Tebligata bağla…" en üstte.
+            let mzG = null;
+            try { mzG = mazbataBagMenusu(h); } catch (e) {}
+            if (mzG) kartG = mzG.concat(kartG || []);
             // Ek betiklerin satırları (ör. paylas.js: belge üzerinde "Belgeyi paylaş")
             let ekG = [];
             (window.__uyapSagMenuEkleri || []).forEach(function(f) {
@@ -5760,7 +5933,10 @@ const _EK_BETIK_DOSYALARI: &[&str] = &[
     "anasayfa.js",
     "icra.js",
     "isler.js",
+    "belgeler.js",
     "paylas.js",
+    "guncelleme.js",
+    "yazi.js",
 ];
 // armonia-renk.css: UYAP stilindeki lacivert/gri renkleri tema değişkenlerimize bağlayan, araclar/renk_uret.py ile
 // üretilen katman (2026-11-14). tema.css'ten önce gelir: elle ince ayarlar eşit özgüllükte kazanır.
@@ -6691,9 +6867,28 @@ async fn yerel_giris_kodu(
 /// Sayfadaki "Paylaş" düğmesi için: gövdedeki UDF baytlarını bu bilgisayarda PDF'e çevirip döner.
 /// Hiçbir yere gönderilmez, saklanmaz; yalnız oturumu açık sayfa çağırabilir.
 async fn udf_pdf_cevir(
+    st: axum::extract::State<AppRuntimeState>,
+    connect_info: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
+    req: AxumRequest,
+) -> Response {
+    udf_isle(st, connect_info, req, false).await
+}
+
+/// "UDF İndir" için: portal belgesindeki alan adlarının yerine değerleri yerleştirilmiş kopya (udf_alan.rs).
+/// Doldurulacak alan yoksa 204 (sayfa asıl dosyayı kullanır).
+async fn udf_doldur_cevir(
+    st: axum::extract::State<AppRuntimeState>,
+    connect_info: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
+    req: AxumRequest,
+) -> Response {
+    udf_isle(st, connect_info, req, true).await
+}
+
+async fn udf_isle(
     axum::extract::State(state): axum::extract::State<AppRuntimeState>,
     connect_info: Option<axum::Extension<ConnectInfo<SocketAddr>>>,
     req: AxumRequest,
+    doldur: bool,
 ) -> Response {
     let client_host = resolve_client_host(&state, connect_info.as_ref());
     let pq = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
@@ -6714,6 +6909,19 @@ async fn udf_pdf_cevir(
     };
     if !crate::udf_pdf::udf_zip_mi(&govde) {
         return hata(StatusCode::UNSUPPORTED_MEDIA_TYPE, "UDF değil.");
+    }
+    if doldur {
+        return match tokio::task::spawn_blocking(move || crate::udf_alan::doldur(&govde)).await {
+            Ok(Ok(Some(udf))) => Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/octet-stream")
+                .header("Cache-Control", "no-store")
+                .body(Body::from(udf))
+                .unwrap(),
+            Ok(Ok(None)) => Response::builder().status(StatusCode::NO_CONTENT).body(Body::empty()).unwrap(),
+            Ok(Err(e)) => hata(StatusCode::UNPROCESSABLE_ENTITY, &e),
+            Err(_) => hata(StatusCode::INTERNAL_SERVER_ERROR, "İşlem yarıda kaldı."),
+        };
     }
     match tokio::task::spawn_blocking(move || crate::udf_pdf::udf_pdf_uret(&govde)).await {
         Ok(Ok(pdf)) => Response::builder()
@@ -7066,6 +7274,46 @@ async fn proxy_handler(
             .unwrap();
     }
 
+    // Güncelleme (2026-11-23, src/guncelleme.rs): durum ve onaylı kurulum. Yalnız bu bilgisayardan; kurulum POST'u
+    // başka siteden gelemez.
+    if full_path == "__cu__/guncelleme" || full_path == "__cu__/guncelleme/kur" {
+        if !_yerel_istemci_mi(&client_host, &req_headers_axum) {
+            return Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("Bulunamadi.")).unwrap();
+        }
+        let json = |kod: StatusCode, v: serde_json::Value| {
+            Response::builder()
+                .status(kod)
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Cache-Control", "no-store")
+                .body(Body::from(v.to_string()))
+                .unwrap()
+        };
+        if full_path == "__cu__/guncelleme/kur" {
+            let capraz = req_headers_axum
+                .get("sec-fetch-site")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| !v.eq_ignore_ascii_case("same-origin"))
+                .unwrap_or(false);
+            if method != axum::http::Method::POST || capraz {
+                return json(StatusCode::BAD_REQUEST, serde_json::json!({ "hata": "Geçersiz istek." }));
+            }
+            return match crate::guncelleme::kur() {
+                Ok(()) => json(StatusCode::OK, crate::guncelleme::durum_json()),
+                Err(e) => json(StatusCode::CONFLICT, serde_json::json!({ "hata": e })),
+            };
+        }
+        if query.split('&').any(|p| p == "yenile=1") {
+            crate::guncelleme::simdi_denetle();
+        }
+        return json(StatusCode::OK, crate::guncelleme::durum_json());
+    }
+
+    // Armonia Yazı editörü (2026-11-23, src/yazi_sunucu.rs): açılır penceredeki çerçeve buradan yüklenir.
+    if crate::yazi_sunucu::is_path(&full_path) {
+        let (status, out_headers, out_body) = crate::yazi_sunucu::yanit(method.as_str(), &full_path);
+        return tuple_to_axum_response(status, out_headers, out_body);
+    }
+
     // İş Listesi (büro veritabanı, kişiye göre): icra_api'den ÖNCE (aynı ön ek).
     if crate::is_api::is_path(&full_path) {
         let capraz = req_headers_axum
@@ -7304,6 +7552,7 @@ pub fn build_app(state: AppRuntimeState) -> Router {
         .route("/__uyap_yerel__/kod", post(yerel_giris_kodu))
         .route("/__uyap_yerel__/giris", get(yerel_giris))
         .route("/__uyap_yerel__/udf_pdf", post(udf_pdf_cevir))
+        .route("/__uyap_yerel__/udf_doldur", post(udf_doldur_cevir))
         .route("/__uyap_yerel__/paylas", post(yerel_paylas))
         .route("/__uyap_lan__/giris", get(lan_giris_formu).post(lan_giris))
         .route("/", any(proxy_handler))

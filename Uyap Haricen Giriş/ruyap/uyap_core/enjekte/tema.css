@@ -294,6 +294,58 @@ html[data-cu-tema="koyu"] .u-navbar .cu-avatar { background: var(--cu-vurgu-parl
     .u-navbar li.tour-7 { border-left: 0 !important; }
 }
 
+/* ══ ÜST ÇUBUK: KENDİ TASARIMIMIZ (kullanıcı isteği 2026-11-23) ══
+   1) İnce: 60 px yerine --cu-nav-yuk (masaüstü 48 px; yatık telefonda 38 px, bkz. mobil.css). Bu ölçü tek
+      kaynaktır: içerik, sol menü, İş Listesi ve İcra sayfaları hep bu değişkenden başlar (gorevcubugu.js artık
+      ölçüp üzerine yazmıyor). Telefonda kullanıcı şeridi açılınca çubuk kendi boyuna uzar.
+   2) Görünüm (UYAP ve Koyu seçenekleri dışındaki temalar): renkli dolu bant + yarı saydam kare düğmeler +
+      kullanıcı alanının önünde dikey çizgi yerine açık yüzeyli sade çubuk: temanın kart yüzeyi, altında ince
+      kenar çizgisi, simgeler temanın yazı renginde, üzerine gelince vurgu tonlu yuvarlak zemin; tarih-saat
+      çerçevesiz soluk yazı; kullanıcı alanı vurgu renkli baş harf + ad, ayırıcı çizgisiz. */
+:root { --cu-nav-yuk: 48px; }
+div.u-navbar, nav.navbar.u-navbar { height: var(--cu-nav-yuk) !important; min-height: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+div.u-navbar:has(.navbar-collapse.show), nav.navbar.u-navbar:has(.navbar-collapse.show) { height: auto !important; }
+body:has(.u-navbar) #page-content-wrapper { padding-top: var(--cu-nav-yuk) !important; }
+.u-navbar .navbar-brand { height: var(--cu-nav-yuk) !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+.cu-logo { height: var(--cu-nav-yuk) !important; gap: 9px; }
+.cu-logo-isaret { width: 28px; height: 28px; border-radius: 7px; }
+/* UYAP'ın ".mobile-logo img{width:100%}" kuralı (<992 px) logoyu 160 px'e büyütüp başlığın dışına taşırıyordu. */
+.u-navbar .navbar-brand img.cu-logo-isaret { width: 28px; height: 28px; max-width: none; }
+.cu-logo-yazi b { font-size: 15px; }
+.cu-logo-yazi small { margin-top: 2px; font-size: 9.5px; }
+.u-navbar .navbar-nav > li.nav-item,
+.u-navbar .navbar-nav > li.nav-item > .nav-link,
+.u-navbar .navbar-nav > li.nav-item > div > .nav-link { height: 34px !important; min-width: 34px; }
+.u-navbar .navbar-nav > li.nav-item > .nav-link,
+.u-navbar .navbar-nav > li.nav-item > div > .nav-link { padding: 0 8px !important; }
+.u-navbar li.no-back { padding-top: 0 !important; margin-top: 0 !important; }
+.u-navbar .cu-avatar { width: 30px; height: 30px; font-size: 12px; }
+.u-navbar .layout-timer { padding: 0 4px; background: none !important; border-radius: 0; font-size: 12px !important; }
+
+html[data-cu-deri] .u-navbar, html[data-cu-deri] .u-navbar.bg-primary {
+    background-color: var(--cu-t-yuzey, #fcfbf8) !important;
+    --cu-ust-yazi: var(--cu-t-yazi, #43423d); --cu-ust-soluk: color-mix(in srgb, var(--cu-t-yazi, #43423d) 62%, transparent);
+    --cu-ust-kenar: var(--cu-t-kenar, #e8e2d7); --cu-ust-hover: var(--cu-vurgu-zemin, #e4ebe0); }
+html[data-cu-deri] div.u-navbar { border-bottom: 1px solid var(--cu-t-kenar, #e8e2d7) !important; }
+html[data-cu-deri] .u-navbar :is(span, div, a, i, b, strong, small, button, p, svg) { color: var(--cu-ust-yazi) !important; }
+html[data-cu-deri] .u-navbar :is(.cu-logo-yazi small, .layout-timer, .layout-timer *) { color: var(--cu-ust-soluk) !important; }
+html[data-cu-deri] .u-navbar .navbar-nav > li.nav-item { border-radius: 999px !important; }
+html[data-cu-deri] .u-navbar .navbar-nav > li.nav-item:hover { background: var(--cu-ust-hover) !important; }
+html[data-cu-deri] .u-navbar :is(li.no-back, li.tour-7) { border-left: 0 !important; padding-left: 0 !important; margin-left: 6px !important; }
+html[data-cu-deri] .u-navbar .cu-avatar { background: var(--cu-vurgu) !important; color: var(--cu-vurgu-uzeri, #fff) !important; }
+html[data-cu-deri] .u-navbar .navbar-toggler { border: 0 !important; box-shadow: none !important; }
+html[data-cu-deri] .u-navbar .navbar-toggler:is(:hover, :active) { background: var(--cu-ust-hover) !important; }
+html[data-cu-deri] .u-navbar input { color: var(--cu-ust-yazi) !important; }
+html[data-cu-deri] .u-navbar .navbar-collapse.show { background: var(--cu-t-yuzey, #fcfbf8); border-top: 1px solid var(--cu-t-kenar, #e8e2d7); }
+html[data-cu-deri] #cu-tema-dugme .cu-tema-nokta { border-color: var(--cu-t-yuzey, #fff); }
+/* e-Duruşma düğmesi: UYAP'ın beyaz "e-Duruşma" logosu açık çubukta görünmüyordu ve UYAP öğesi; yerine kendi
+   çizgi simgemiz (kamera), temanın yazı renginde. */
+html[data-cu-deri] .u-navbar .durusma-nav-item button.nav-link > img { display: none !important; }
+html[data-cu-deri] .u-navbar .durusma-nav-item button.nav-link::before {
+    content: ""; display: block; width: 20px; height: 20px; background: var(--cu-ust-yazi);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='6' width='14' height='12' rx='2.5'/%3E%3Cpath d='M16 10.5l6-3.5v10l-6-3.5z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='6' width='14' height='12' rx='2.5'/%3E%3Cpath d='M16 10.5l6-3.5v10l-6-3.5z'/%3E%3C/svg%3E") center / contain no-repeat; }
+
 /* ══ YÜKLEME GÖSTERGELERİ (2026-11-11) ══
    UYAP'ın yükleme paneli (AdaletLoadPanel → .custom-loader) gösterge olarak UYAP logosunu
    (uyap-logo-without-bg.svg) ve çevresinde dönen bir halka çiziyor; ekranı da %40 karartıyordu. Diğer

@@ -250,6 +250,15 @@ pub fn dosya_baglari<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Vec<Bag>
         .collect())
 }
 
+/// Dosyanın elle mazbata bağları: (tebligat evrak no, mazbata evrak no).
+pub fn elle_mazbata_baglari<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Vec<(i32, i32)>, String> {
+    Ok(c.query("SELECT tebligat_evrak_no, mazbata_evrak_no FROM tebligat_mazbata_bagi WHERE dosya_id = $1 ORDER BY id", &[&dosya])
+        .map_err(hata)?
+        .iter()
+        .map(|s| (s.get(0), s.get(1)))
+        .collect())
+}
+
 /// Dosyanın borçlu bağları: (bağ kimliği, görünen ad) — tebligat → borçlu eşleşmesi için.
 pub fn dosya_borclulari<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Vec<(i64, String)>, String> {
     Ok(dosya_baglari(c, dosya)?
@@ -837,6 +846,8 @@ pub struct TebligatKaydi {
     pub zarf_icerigi: String,
     /// Belgede yazan haciz ihbarnamesi sırası (89/1-2-3). Boşsa ya da kullanıcı elle girdiyse kayıtlıya dokunulmaz.
     pub haciz_sirasi: Option<i16>,
+    /// Fiziki zarfın adres bloğu (PDF'ten; Mernis kıyası için). Boşsa kayıtlıya dokunulmaz.
+    pub teblig_adresi: String,
 }
 
 /// Daha önce kaydedilmiş tebligat (barkod bir kez atanır, değişmez).
@@ -849,11 +860,13 @@ pub struct BilinenTebligat {
     pub ptt_durumu: String,
     pub son_islem_tarihi: String,
     pub evrak_tarihi: String,
+    /// Kayıtlı zarf adresi (`t212_teblig_adresi`); boşsa fiziki ödeme emri zarfının PDF'i bir kez daha indirilir.
+    pub teblig_adresi: String,
 }
 
 pub fn bilinen_tebligat<C: GenericClient>(c: &mut C, dosya: i64, birim_evrak_no: i32) -> Result<Option<BilinenTebligat>, String> {
     Ok(c.query_opt(
-        "SELECT id, barkod, tebligat_turu, elektronik_tebligat, ptt_durumu, son_islem_tarihi, evrak_tarihi
+        "SELECT id, barkod, tebligat_turu, elektronik_tebligat, ptt_durumu, son_islem_tarihi, evrak_tarihi, t212_teblig_adresi
            FROM tebligat_barkod WHERE dosya_id = $1 AND birim_evrak_no = $2",
         &[&dosya, &birim_evrak_no],
     )
@@ -866,6 +879,7 @@ pub fn bilinen_tebligat<C: GenericClient>(c: &mut C, dosya: i64, birim_evrak_no:
         ptt_durumu: s.get(4),
         son_islem_tarihi: s.get(5),
         evrak_tarihi: s.get(6),
+        teblig_adresi: s.get(7),
     }))
 }
 
@@ -896,7 +910,8 @@ pub fn tebligat_kaydet<C: GenericClient>(c: &mut C, dosya: i64, birim_evrak_no: 
                 yeniden_teblig_talep_edildi = $11, sorgu_zamani = now(),
                 zarf_icerigi = CASE WHEN $12 = '' THEN zarf_icerigi ELSE $12 END,
                 haciz_sirasi = CASE WHEN haciz_sirasi_elle THEN haciz_sirasi ELSE COALESCE($13, haciz_sirasi) END,
-                muhatap_adi = $14, muhatap_turu = $15
+                muhatap_adi = $14, muhatap_turu = $15,
+                t212_teblig_adresi = CASE WHEN $16 = '' THEN t212_teblig_adresi ELSE $16 END
           WHERE id = $1",
         &[
             &id,
@@ -914,6 +929,7 @@ pub fn tebligat_kaydet<C: GenericClient>(c: &mut C, dosya: i64, birim_evrak_no: 
             &k.haciz_sirasi,
             &kirp(&teb::muhatap_adi(&k.evrak_aciklama), 255),
             &teb::muhatap_turu(&k.evrak_aciklama).kod(),
+            &k.teblig_adresi,
         ],
     )
     .map_err(hata)?;

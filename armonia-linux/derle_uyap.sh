@@ -67,7 +67,7 @@ cp -r "$SRC/uyap_core/enjekte" "$OUT/uyap_core/enjekte"
 [ -f "$SRC/uyap_core/yazi/index.html" ] && cp -r "$SRC/uyap_core/yazi" "$OUT/uyap_core/yazi"
 cp -r "$SRC/webapp" "$OUT/webapp"
 cat >"$OUT/SURUM" <<EOT
-surum=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+surum=${CU_SURUM:-$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)}
 git=$GIT_HEAD (degismis dosya: $GIT_KIRLI)
 kaynak_ozet=$KAYNAK_OZET
 derleme=$(date -u +%Y-%m-%dT%H:%M:%SZ)

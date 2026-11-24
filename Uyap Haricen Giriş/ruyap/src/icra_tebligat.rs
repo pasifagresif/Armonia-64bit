@@ -177,9 +177,13 @@ pub fn mazbatasi_dondu_mu(barkod: &str, evrak_aciklama: &str, mazbata_var: bool,
 /// Dosyanın mazbata evrakları: barkoda göre ve açıklamasında barkod olmayanlar.
 #[derive(Debug, Default, Clone)]
 pub struct Mazbatalar {
-    barkodlu: HashMap<String, String>,
-    /// Açıklamasında barkod olmayan mazbatalar: (açıklama, evrak günü).
-    barkodsuz: Vec<(String, Option<chrono::NaiveDate>)>,
+    /// barkod → (mazbata evrak no, açıklama).
+    barkodlu: HashMap<String, (String, String)>,
+    /// Açıklamasında barkod olmayan mazbatalar: (evrak no, açıklama, evrak günü).
+    barkodsuz: Vec<(String, String, Option<chrono::NaiveDate>)>,
+    /// Elle bağlanan mazbatalar (dosya panelinde sağ tık, `tebligat_mazbata_bagi`): tebligat evrak no → açıklama.
+    /// Otomatik eşleşmeden önce gelir.
+    elle: HashMap<String, String>,
     /// PTT ile giden (elektronik olmayan) tebligat evrakları: birim evrak no → evrak günü. Barkodsuz fiziki
     /// "Tebliğ Mazbatası" yalnız bunlardan birine ait olabilir; e-tebligatın mazbatası "Kapalı E-Tebliğ
     /// Mazbatası"dır (ayrı tür). 2026/7574: bir ödeme emri + 15 banka e-tebligatı varken mazbata bağlanmıyordu.
@@ -203,11 +207,12 @@ impl Mazbatalar {
                 continue;
             }
             let aciklama = metin(e, "aciklama");
+            let no = metin(e, "birimEvrakNo");
             match mazbata_barkodu(&aciklama) {
                 Some(b) => {
-                    m.barkodlu.entry(b).or_insert(aciklama);
+                    m.barkodlu.entry(b).or_insert((no, aciklama));
                 }
-                None => m.barkodsuz.push((aciklama, evrak_gunu(e))),
+                None => m.barkodsuz.push((no, aciklama, evrak_gunu(e))),
             }
         }
         m
@@ -234,6 +239,22 @@ impl Mazbatalar {
         adaylar.next().is_none().then_some(ilk.0.as_str())
     }
 
+    /// Elle bağları uygular: `(tebligat evrak no, mazbata evrak no)`. Bağlanan mazbata başka tebligata aday olmaz,
+    /// bağlanan tebligat barkodsuz mazbataya aday olmaz. Açıklama mazbatanın türünü, evrak numarasını ve gününü taşır
+    /// (barkod taşımaz: kullanıcının bağı açıklamadaki barkod denetimine takılmaz).
+    pub fn elle_bagla(&mut self, baglar: &[(i32, i32)], evraklar: &[Value]) {
+        for (teb, mz) in baglar {
+            let mz_s = mz.to_string();
+            let evrak = evraklar.iter().find(|e| metin(e, "birimEvrakNo") == mz_s);
+            let tur = evrak.map(|e| metin(e, "tur")).filter(|t| !t.is_empty()).unwrap_or_else(|| "Mazbata".into());
+            let gun = evrak.and_then(evrak_gunu).map(|g| format!(", {}", g.format("%d.%m.%Y"))).unwrap_or_default();
+            self.elle.insert(teb.to_string(), format!("Elle bağlandı: {tur} (evrak {mz}{gun})"));
+            self.barkodsuz.retain(|(no, _, _)| *no != mz_s);
+            self.barkodlu.retain(|_, (no, _)| *no != mz_s);
+            self.fiziki.remove(&teb.to_string());
+        }
+    }
+
     pub fn sayi(&self) -> usize {
         self.barkodlu.len() + self.barkodsuz.len()
     }
@@ -242,9 +263,12 @@ impl Mazbatalar {
     /// mazbata, [`Self::barkodsuz_sahibi`] bu evrakı TEK aday olarak gösteriyorsa bağlanır (e-tebligatlar sayılmaz).
     pub fn bul(&self, barkod: &str, evrak_no: i32) -> Option<String> {
         let no = evrak_no.to_string();
+        if let Some(a) = self.elle.get(&no) {
+            return Some(a.clone());
+        }
         let ac = match self.barkodlu.get(barkod) {
-            Some(a) => a,
-            None => &self.barkodsuz.iter().find(|(_, g)| self.barkodsuz_sahibi(*g) == Some(no.as_str()))?.0,
+            Some((_, a)) => a,
+            None => &self.barkodsuz.iter().find(|(_, _, g)| self.barkodsuz_sahibi(*g) == Some(no.as_str()))?.1,
         };
         Some(if ac.is_empty() { "Var".to_string() } else { ac.clone() })
     }
@@ -960,18 +984,28 @@ pub fn tebligat_borclusunu_coz(
     if let Some(b) = borclu_adindan(aciklama, borclular) {
         return Some(b);
     }
-    if muhatap_turu(aciklama) == MuhatapTuru::Vekil {
-        let ic = muhatap_parantezi(aciklama).unwrap_or_default();
-        let ad: String = ic.chars().skip("vekil".len()).collect();
-        let hedef = kelimeler(&ad);
-        if !hedef.is_empty() {
-            let adaylar: BTreeSet<i64> = vekiller.iter().filter(|(_, v)| kelimeler(v) == hedef).map(|(b, _)| *b).collect();
-            if adaylar.len() == 1 {
-                return adaylar.into_iter().next();
-            }
-        }
+    let adaylar = vekilin_borclulari(aciklama, vekiller);
+    if adaylar.len() == 1 {
+        return adaylar.into_iter().next();
     }
     tek(&borclular.iter().map(|b| b.0).collect::<Vec<_>>())
+}
+
+/// "Vekil …" muhataplı tebligatta o vekilin temsil ettiği borçlu bağları (vekil değilse boş). Vekile yapılan tebliğ
+/// asile yapılmış sayılır (Tebligat K. 11): vekil birden çok borçluyu temsil ediyorsa zarf tek borçluya bağlanamaz
+/// ama kesinleşme hesabında hepsinin tebliği sayılır (`icra_durum`; kullanıcı bulgusu 23.11.2026).
+pub fn vekilin_borclulari(aciklama: &str, vekiller: &[(i64, String)]) -> Vec<i64> {
+    if muhatap_turu(aciklama) != MuhatapTuru::Vekil {
+        return Vec::new();
+    }
+    let ic = muhatap_parantezi(aciklama).unwrap_or_default();
+    let ad: String = ic.chars().skip("vekil".len()).collect();
+    let hedef = kelimeler(&ad);
+    if hedef.is_empty() {
+        return Vec::new();
+    }
+    let adaylar: BTreeSet<i64> = vekiller.iter().filter(|(_, v)| kelimeler(v) == hedef).map(|(b, _)| *b).collect();
+    adaylar.into_iter().collect()
 }
 
 /// Açıklamadaki BORÇLU muhatabının adından borçlu (tam / sırası farklı / baş kısmı eşleşen TEK borçlu).

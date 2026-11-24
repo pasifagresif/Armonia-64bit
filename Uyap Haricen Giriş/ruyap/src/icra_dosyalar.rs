@@ -20,7 +20,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use postgres::GenericClient;
 use serde_json::{json, Value};
 
@@ -37,36 +37,74 @@ pub const AVUKAT_AYARI: &str = "eimza_avukat";
 
 // ── Süzgeç ──────────────────────────────────────────────────────────────────────────────────────
 
+/// Süzgeç sütunları. Tablo sütunlarına ek olarak: dosya yılı (Dosya No süzgecinin içinde) ve açılış / kapanış günlerinin
+/// yılı ve ayı (üstteki "Yıl / ay" seçimi; 21.11.2026). Yıl ve ay kodludur: yıl "2025", ay "1"…"12".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sutun {
     Birim,
     DosyaNo,
+    DosyaTur,
     Alacakli,
     Borclu,
     Rol,
     Tur,
     Yol,
     Sekil,
+    Yil,
+    AcilisYil,
+    AcilisAy,
+    KapanisYil,
+    KapanisAy,
 }
 
+/// Ay adları (süzgeç etiketi).
+pub const AYLAR: [&str; 12] = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
 impl Sutun {
-    pub const HEPSI: [Sutun; 8] =
-        [Sutun::Birim, Sutun::DosyaNo, Sutun::Alacakli, Sutun::Borclu, Sutun::Rol, Sutun::Tur, Sutun::Yol, Sutun::Sekil];
+    pub const HEPSI: [Sutun; 14] = [
+        Sutun::Birim,
+        Sutun::DosyaNo,
+        Sutun::DosyaTur,
+        Sutun::Alacakli,
+        Sutun::Borclu,
+        Sutun::Rol,
+        Sutun::Tur,
+        Sutun::Yol,
+        Sutun::Sekil,
+        Sutun::Yil,
+        Sutun::AcilisYil,
+        Sutun::AcilisAy,
+        Sutun::KapanisYil,
+        Sutun::KapanisAy,
+    ];
     pub fn anahtar(self) -> &'static str {
         match self {
             Sutun::Birim => "birim",
             Sutun::DosyaNo => "dosya_no",
+            Sutun::DosyaTur => "dosya_tur",
             Sutun::Alacakli => "alacakli",
             Sutun::Borclu => "borclu",
             Sutun::Rol => "rol",
             Sutun::Tur => "takip_turu",
             Sutun::Yol => "takip_yolu",
             Sutun::Sekil => "takip_sekli",
+            Sutun::Yil => "yil",
+            Sutun::AcilisYil => "acilis_yil",
+            Sutun::AcilisAy => "acilis_ay",
+            Sutun::KapanisYil => "kapanis_yil",
+            Sutun::KapanisAy => "kapanis_ay",
         }
+    }
+    fn bul(anahtar: &str) -> Option<Sutun> {
+        Sutun::HEPSI.into_iter().find(|s| s.anahtar() == anahtar)
     }
     /// Değer sabit bir koddur (yalnız listeden seçilir).
     fn kodlu(self) -> bool {
-        matches!(self, Sutun::Rol)
+        matches!(self, Sutun::Rol | Sutun::Yil | Sutun::AcilisYil | Sutun::AcilisAy | Sutun::KapanisYil | Sutun::KapanisAy)
+    }
+    /// Yalnız kapalı dosyalarda anlamlı (kapanış günü).
+    fn kapanis(self) -> bool {
+        matches!(self, Sutun::KapanisYil | Sutun::KapanisAy)
     }
     fn sinirli(self) -> bool {
         matches!(self, Sutun::DosyaNo | Sutun::Alacakli | Sutun::Borclu)
@@ -75,6 +113,10 @@ impl Sutun {
         match (self, deger) {
             (Sutun::Rol, d) => rol_etiketi(d).to_string(),
             (Sutun::Tur | Sutun::Yol | Sutun::Sekil, "") => "(okunmadı)".into(),
+            (Sutun::AcilisYil | Sutun::AcilisAy | Sutun::KapanisYil | Sutun::KapanisAy, "") => "(tarihsiz)".into(),
+            (Sutun::AcilisAy | Sutun::KapanisAy, d) => {
+                d.parse::<usize>().ok().and_then(|n| AYLAR.get(n.wrapping_sub(1))).map(|a| a.to_string()).unwrap_or_else(|| d.to_string())
+            }
             (_, "") => "(boş)".into(),
             (_, d) => d.to_string(),
         }
@@ -100,7 +142,13 @@ pub struct Filtre {
     pub acilis: (Option<NaiveDate>, Option<NaiveDate>),
     /// Yalnız kapalı dosyalarda anlamlı.
     pub kapanis: (Option<NaiveDate>, Option<NaiveDate>),
+    /// Dosya listesi (`icra_listeler`): yalnız bu listedeki dosyalar; None = hepsi.
+    pub liste: Option<i64>,
     pub sutun: HashMap<&'static str, String>,
+    /// Süzgeçlerin sırası ("Süzgeçler" penceresinde sürüklenerek değişir; 21.11.2026). Bir süzgecin seçenekleri yalnız
+    /// kendinden ÖNCEKİ süzgeçlere uyan dosyalardan sayılır (iç içe süzgeç: üstteki alttakini kapsar). Sırada olmayan
+    /// süzgeçler en üsttedir. Boşsa eski kural: her sütunun seçenekleri öteki bütün süzgeçlerle.
+    pub sira: Vec<Sutun>,
     pub sirala: String,
     pub azalan: bool,
     pub sayfa: usize,
@@ -110,21 +158,44 @@ pub struct Filtre {
 impl Filtre {
     pub fn oku(q: &HashMap<String, String>) -> Filtre {
         let gun = |a: &str| q.get(a).and_then(|v| veri::tarih::gun_coz(v));
+        let durum = q.get("durum").cloned().unwrap_or_default();
         let mut sutun = HashMap::new();
         for s in Sutun::HEPSI {
+            // Kapanış yılı / ayı yalnız kapalı dosyalarda (açık dosyanın kapanış günü yok).
+            if s.kapanis() && durum != "kapali" {
+                continue;
+            }
             if let Some(v) = q.get(s.anahtar()).filter(|v| !v.is_empty()) {
                 sutun.insert(s.anahtar(), v.clone());
             }
         }
+        let mut sira: Vec<Sutun> = Vec::new();
+        for s in q.get("sira").map(String::as_str).unwrap_or("").split(',').filter_map(|a| Sutun::bul(a.trim())) {
+            if sutun.contains_key(s.anahtar()) && !sira.contains(&s) {
+                sira.push(s);
+            }
+        }
         Filtre {
-            durum: q.get("durum").cloned().unwrap_or_default(),
             acilis: (gun("acilis_bas"), gun("acilis_son")),
             kapanis: (gun("kapanis_bas"), gun("kapanis_son")),
+            durum,
+            liste: crate::icra_listeler::liste_oku(q),
             sutun,
+            sira,
             sirala: q.get("sirala").cloned().unwrap_or_default(),
             azalan: q.get("yon").is_some_and(|y| y == "azalan"),
             sayfa: q.get("sayfa").and_then(|v| v.parse().ok()).unwrap_or(1),
             boyut: q.get("boyut").and_then(|v| v.parse().ok()).unwrap_or(100),
+        }
+    }
+    /// Sütun `i`'nin seçenekleri sayılırken sütun `j`'nin süzgeci uygulanır mı (sıra kuralı, bkz. `sira`).
+    fn sayimda_uygula(&self, i: Sutun, j: Sutun) -> bool {
+        if self.sira.is_empty() {
+            return true;
+        }
+        match (self.sira.iter().position(|s| *s == i), self.sira.iter().position(|s| *s == j)) {
+            (Some(pi), Some(pj)) => pj < pi,
+            _ => true,
         }
     }
     fn deger(&self, s: Sutun) -> &str {
@@ -199,7 +270,7 @@ pub fn kapanis_coz(durum: &str) -> (Option<NaiveDate>, String) {
 
 /// Adları karşılaştırmak için: Türkçe küçük harf; harf ve rakam dışı her şey (nokta, virgül, parantez, köşeli parantez)
 /// boşluk; boşluklar tek.
-fn ad_anahtari(ad: &str) -> String {
+pub(crate) fn ad_anahtari(ad: &str) -> String {
     teb::tr_kucuk(ad)
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { ' ' })
@@ -313,6 +384,8 @@ pub struct Satir {
     yil: i32,
     sira_no: i32,
     pub dosya_tur: String,
+    /// MTS'den icra dairesine geçmiş dosya (`icra_api::MTS_KAYNAKLI_SQL`): dosya türü "İcra Dosyası (MTS'den)".
+    pub mts_kaynakli: bool,
     pub durum: String,
     pub acik: bool,
     pub acilis: Option<NaiveDate>,
@@ -337,23 +410,39 @@ pub struct Satir {
 }
 
 impl Satir {
+    /// Dosya türü süzgeç değeri ve görünen adı: UYAP'taki tür ("İcra Dosyası", "MTS", "Talimat Dosyası", "İflas
+    /// Dosyası" …); MTS'den gelen icra dosyasında " (MTS'den)" eki (Süreçler'deki "Dosya türü" süzgeciyle aynı değer).
+    pub fn dosya_turu(&self) -> String {
+        let tur = self.dosya_tur.trim();
+        if self.mts_kaynakli { format!("{tur}{}", crate::icra_api::MTS_KAYNAKLI_EKI) } else { tur.to_string() }
+    }
+
     fn degerler(&self, s: Sutun) -> Vec<String> {
         let bir = |x: &str| vec![x.to_string()];
+        let yil = |g: Option<NaiveDate>| vec![g.map(|g| g.year().to_string()).unwrap_or_default()];
+        let ay = |g: Option<NaiveDate>| vec![g.map(|g| g.month().to_string()).unwrap_or_default()];
         match s {
             Sutun::Birim => bir(&self.birim),
             Sutun::DosyaNo => bir(&self.dosya_no),
+            Sutun::DosyaTur => vec![self.dosya_turu()],
             Sutun::Alacakli => self.alacaklilar.clone(),
             Sutun::Borclu => self.borclular.clone(),
             Sutun::Rol => bir(self.rol),
             Sutun::Tur => bir(&self.takip_turu),
             Sutun::Yol => bir(&self.takip_yolu),
             Sutun::Sekil => bir(&self.takip_sekli),
+            Sutun::Yil => vec![if self.yil > 0 { self.yil.to_string() } else { String::new() }],
+            Sutun::AcilisYil => yil(self.acilis),
+            Sutun::AcilisAy => ay(self.acilis),
+            Sutun::KapanisYil => yil(self.kapanis),
+            Sutun::KapanisAy => ay(self.kapanis),
         }
     }
 
     fn json(&self) -> Value {
         json!({
             "dosya": self.dosya, "birim": self.birim, "dosya_no": self.dosya_no, "dosya_tur": self.dosya_tur,
+            "dosya_turu": self.dosya_turu(), "mts_kaynakli": self.mts_kaynakli, "yil": self.yil,
             "durum": self.durum, "acik": self.acik,
             "acilis_tarihi": self.acilis.map(|d| d.to_string()), "kapanis_tarihi": self.kapanis.map(|d| d.to_string()),
             "kapanis_sebebi": self.kapanis_sebebi, "alacaklilar": self.alacaklilar, "borclular": self.borclular,
@@ -416,6 +505,38 @@ pub fn avukat_ekle<C: GenericClient>(c: &mut C, ad: &str) -> Result<bool, String
     Ok(true)
 }
 
+/// Bütün icra dosyalarında avukatın rolü (dosya kimliği → [`benim_rolum`] kodu; bilinmiyorsa ""). Dosya Listesi ile
+/// aynı hesap; Tebligatlar sekmesinin "Rolümüz" süzgeci kullanır (23.11.2026).
+pub fn avukat_rolleri<C: GenericClient>(c: &mut C) -> Result<HashMap<i64, &'static str>, String> {
+    let avukatlar = avukat_adlari(c)?;
+    let taraf_ad = crate::icra_api::ad_sql("vt");
+    let mut taraflar: HashMap<i64, Vec<VekilliTaraf>> = HashMap::new();
+    if avukatlar.is_empty() {
+        return Ok(HashMap::new());
+    }
+    for s in c
+        .query(
+            &format!(
+                "SELECT x.dosya_id, x.rol || chr(9) || {taraf_ad} || chr(9) || string_agg(btrim(v.ad || ' ' || v.soyad), ', ' ORDER BY dv.id)
+                   FROM dosya_taraf x JOIN dosya d ON d.id = x.dosya_id AND d.yargi_turu = 2 JOIN taraf vt ON vt.id = x.taraf_id
+                   JOIN dosya_taraf_vekiller dv ON dv.dosyataraf_id = x.id JOIN vekil v ON v.id = dv.vekil_id
+                  WHERE x.uyapta_gorulmedi IS NULL
+                  GROUP BY x.dosya_id, x.id, x.rol, vt.id, vt.tur, vt.unvan, vt.mersis_no, vt.vergi_no, vt.ad, vt.soyad, vt.tckn"
+            ),
+            &[],
+        )
+        .map_err(hata)?
+    {
+        let ham: String = s.get(1);
+        let mut p = ham.splitn(3, '\t');
+        let (Some(rol), Some(ad), Some(vekiller)) = (p.next(), p.next(), p.next()) else { continue };
+        taraflar.entry(s.get::<_, i64>(0)).or_default().push(VekilliTaraf {
+            rol: rol.to_string(), ad: ad.to_string(), vekiller: vekiller.to_string(),
+        });
+    }
+    Ok(taraflar.into_iter().map(|(d, t)| (d, benim_rolum(&t, &avukatlar).0)).collect())
+}
+
 /// Takip şekli: "Örnek 7" (örnek no okunduysa), yoksa UYAP'taki adı.
 fn sekil_adi(ornek: &str, aciklama: &str) -> String {
     if !ornek.trim().is_empty() {
@@ -449,10 +570,12 @@ pub fn satirlari_oku<C: GenericClient>(c: &mut C) -> Result<Vec<Satir>, String> 
                 EXISTS (SELECT 1 FROM dosya_taraf x JOIN taraf tr ON tr.id = x.taraf_id
                          WHERE x.dosya_id = d.id AND x.rol = 'borclu' AND x.uyapta_gorulmedi IS NULL
                            AND tr.tckn IS NULL AND tr.mersis_no IS NULL AND tr.vergi_no = ''),
-                d.taraf_bilgisi_zamani IS NULL
+                d.taraf_bilgisi_zamani IS NULL,
+                {mts}
            FROM dosya d JOIN birim b ON b.id = d.birim_id
            LEFT JOIN icra_takip_detay i ON i.dosya_id = d.id
-          WHERE d.yargi_turu = 2"
+          WHERE d.yargi_turu = 2",
+        mts = crate::icra_api::MTS_KAYNAKLI_SQL,
     );
     let mut out = Vec::new();
     for s in c.query(&sql, &[]).map_err(hata)? {
@@ -476,6 +599,7 @@ pub fn satirlari_oku<C: GenericClient>(c: &mut C) -> Result<Vec<Satir>, String> 
             yil: s.get(3),
             sira_no: s.get(4),
             dosya_tur: s.get(5),
+            mts_kaynakli: s.get(20),
             durum,
             acik,
             acilis: s.get(8),
@@ -511,6 +635,7 @@ fn sirala_anahtari(s: &Satir, alan: &str) -> Option<Anahtar> {
     match alan {
         "birim" => metin(&s.birim),
         "dosya_no" => Some(Anahtar::Sayi(i64::from(s.yil), i64::from(s.sira_no))),
+        "dosya_tur" => metin(&s.dosya_turu()),
         "alacakli" => metin(&s.alacaklilar.join(", ")),
         "borclu" => metin(&s.borclular.join(", ")),
         "rol" => (!s.rol.is_empty()).then(|| Anahtar::Metin(tr_sira_anahtari(rol_etiketi(s.rol)))),
@@ -523,8 +648,8 @@ fn sirala_anahtari(s: &Satir, alan: &str) -> Option<Anahtar> {
     }
 }
 
-const SIRALANAN: [&str; 10] =
-    ["birim", "dosya_no", "alacakli", "borclu", "rol", "takip_turu", "takip_yolu", "takip_sekli", "acilis", "kapanis"];
+const SIRALANAN: [&str; 11] =
+    ["birim", "dosya_no", "dosya_tur", "alacakli", "borclu", "rol", "takip_turu", "takip_yolu", "takip_sekli", "acilis", "kapanis"];
 
 /// Seçilen sütuna göre (boşlar yönden bağımsız sonda); eşitlikte daire (alfabetik) ve dosya no. Varsayılan: daire.
 fn sirala(satirlar: &mut [Satir], alan: &str, azalan: bool) {
@@ -566,7 +691,7 @@ fn suz(satirlar: Vec<Satir>, f: &Filtre) -> (Vec<Satir>, HashMap<&'static str, H
         }
         let uyum: Vec<bool> = Sutun::HEPSI.iter().map(|c| sutun_uyar(*c, f.deger(*c), &s.degerler(*c))).collect();
         for (i, c) in Sutun::HEPSI.iter().enumerate() {
-            let digerleri = uyum.iter().enumerate().all(|(j, u)| j == i || *u);
+            let digerleri = uyum.iter().enumerate().all(|(j, u)| j == i || *u || !f.sayimda_uygula(*c, Sutun::HEPSI[j]));
             if digerleri && (!yazi_mi(*c, f.deger(*c)) || uyum[i]) {
                 let say = sayim.entry(c.anahtar()).or_default();
                 let tekil: HashSet<String> = s.degerler(*c).into_iter().collect();
@@ -585,7 +710,7 @@ fn suz(satirlar: Vec<Satir>, f: &Filtre) -> (Vec<Satir>, HashMap<&'static str, H
 
 pub fn dosya_listesi<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Value, String> {
     let avukat_bilinmiyor = avukat_adlari(c)?.is_empty();
-    let hepsi = satirlari_oku(c)?;
+    let hepsi = crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?;
     let genel_toplam = hepsi.len();
     let (satirlar, mut sayim) = suz(hepsi, f);
     let toplam = satirlar.len();
@@ -603,19 +728,54 @@ pub fn dosya_listesi<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Value, S
 }
 
 /// Güncelleme türünün bu dosyaya istek atıp atmayacağı (`icra_guncelle` ile aynı kural). Bilinmeyen tür: hepsi.
-/// "hepsi" (Tüm verileri güncelle) dosya listesinden gelen AÇIK dosyalara işler.
+/// "hepsi" (Tüm verileri güncelle) dosya listesinden gelen AÇIK dosyalara işler. "eksik": Tüm verileri güncelle, dosya
+/// listesi yeniden ALINMADAN (kullanıcı "Liste yakın zamanda alındı, yeniden alınmasın" dedi; 21.11.2026) — aynı dosyalar.
 fn ihtiyac(s: &Satir, mod_: &str) -> bool {
     match mod_ {
         "takip" => s.takip_eksik,
         "taraf" => s.taraf_tum || s.taraf_kimliksiz || s.vekil_okunmamis,
-        "hepsi" => s.acik && (s.takip_eksik || s.taraf_tum || s.taraf_kimliksiz || s.vekil_okunmamis),
+        "hepsi" | "eksik" => s.acik && (s.takip_eksik || s.taraf_tum || s.taraf_kimliksiz || s.vekil_okunmamis),
         _ => true,
     }
 }
 
+/// UYAP'taki bütün açık icra dosyalarının listesinin en son eksiksiz alındığı zamanı yazan büro ayarı.
+pub const LISTE_ZAMANI_AYARI: &str = "icra_liste_zamani";
+
+/// Dosya listesi eksiksiz alındı (`icra_guncelle`, daire / tarih / seçim kapsamı olmadan): zaman + alınan dosya sayısı.
+pub fn liste_zamanini_yaz<C: GenericClient>(c: &mut C, alinan: usize) -> Result<(), String> {
+    c.execute(
+        "INSERT INTO buro_ayar (anahtar, deger)
+         VALUES ($1, jsonb_build_object('zaman', to_char(now(), 'YYYY-MM-DD\"T\"HH24:MI:SS'), 'alinan', $2::bigint))
+         ON CONFLICT (anahtar) DO UPDATE SET deger = EXCLUDED.deger, guncellendi = now()",
+        &[&LISTE_ZAMANI_AYARI, &(alinan as i64)],
+    )
+    .map_err(hata)?;
+    Ok(())
+}
+
+/// Dosya listesinin en son ne zaman alındığı: `{"zaman": "YYYY-MM-DDTHH:MM:SS", "alinan": n, "yaklasik": false}`.
+/// Kayıt yoksa (bu sürümden önceki taramalar) en son künye yazımı (`dosya.son_senkron`) yaklaşık zaman olarak döner;
+/// hiç icra dosyası yoksa null.
+pub fn liste_zamani<C: GenericClient>(c: &mut C) -> Result<Value, String> {
+    if let Some(s) = c.query_opt("SELECT deger FROM buro_ayar WHERE anahtar = $1", &[&LISTE_ZAMANI_AYARI]).map_err(hata)? {
+        let v: Value = s.get(0);
+        if v.get("zaman").and_then(Value::as_str).is_some() {
+            return Ok(json!({"zaman": v["zaman"], "alinan": v.get("alinan").cloned().unwrap_or(Value::Null), "yaklasik": false}));
+        }
+    }
+    let s = c
+        .query_one("SELECT to_char(max(son_senkron), 'YYYY-MM-DD\"T\"HH24:MI:SS') FROM dosya WHERE yargi_turu = 2", &[])
+        .map_err(hata)?;
+    Ok(match s.get::<_, Option<String>>(0) {
+        Some(z) => json!({"zaman": z, "alinan": Value::Null, "yaklasik": true}),
+        None => Value::Null,
+    })
+}
+
 /// Süzgeçteki dosyaların kimlikleri (listedeki sırayla); `mod` verilirse yalnız o güncellemenin istek atacakları.
 pub fn dosya_kimlikleri<C: GenericClient>(c: &mut C, f: &Filtre, mod_: &str) -> Result<Vec<i64>, String> {
-    let (satirlar, _) = suz(satirlari_oku(c)?, f);
+    let (satirlar, _) = suz(crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?, f);
     Ok(satirlar.into_iter().filter(|s| ihtiyac(s, mod_)).map(|s| s.dosya).collect())
 }
 
@@ -638,7 +798,7 @@ pub struct Tahmin {
 /// `acik_toplam`: veritabanındaki açık icra dosyası sayısı (UYAP listesinin kaç sayfa süreceği buna göre).
 pub fn tahmin_et(satirlar: &[Satir], mod_: &str, acik_toplam: usize) -> Result<Tahmin, String> {
     use crate::icra_guncelle::{ISTEK_ARASI_SN, MOLA_HER_DOSYA, MOLA_SN, SAYFA_BOYU};
-    if !["liste", "takip", "taraf", "hepsi"].contains(&mod_) {
+    if !["liste", "takip", "taraf", "hepsi", "eksik"].contains(&mod_) {
         return Err("Güncelleme türü geçersiz.".into());
     }
     let sayfa = acik_toplam.div_ceil(SAYFA_BOYU).max(1);
@@ -661,7 +821,8 @@ pub fn tahmin_et(satirlar: &[Satir], mod_: &str, acik_toplam: usize) -> Result<T
     let istek = match mod_ {
         "liste" => sayfa,
         "takip" => bulma + takip,
-        "taraf" => bulma + taraf_istegi + takip,
+        // Eksikler (liste yeniden alınmadan): dosyalar UYAP'ta bulunur (tek tek ya da liste bir kez), sonra taraf + takip.
+        "taraf" | "eksik" => bulma + taraf_istegi + takip,
         _ => sayfa + taraf_istegi + takip,
     };
     let sure_sn = (istek as f64 * ISTEK_ARASI_SN) as u64 + (n / MOLA_HER_DOSYA) as u64 * MOLA_SN;
@@ -669,15 +830,16 @@ pub fn tahmin_et(satirlar: &[Satir], mod_: &str, acik_toplam: usize) -> Result<T
 }
 
 pub fn istek_tahmini<C: GenericClient>(c: &mut C, f: &Filtre, mod_: &str) -> Result<Value, String> {
-    let (satirlar, _) = suz(satirlari_oku(c)?, f);
+    let (satirlar, _) = suz(crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?, f);
     let acik: i64 = c
         .query_one("SELECT count(*) FROM dosya WHERE yargi_turu = 2 AND durum_kod = 0", &[])
         .map_err(hata)?
         .get(0);
     let t = tahmin_et(&satirlar, mod_, acik.max(0) as usize)?;
+    let liste_zamani = liste_zamani(c)?;
     Ok(json!({"mod": mod_, "dosya": t.dosya, "hedef": t.hedef, "takip": t.takip, "taraf_tum": t.taraf_tum,
               "taraf_kimliksiz": t.taraf_kimliksiz, "vekil_okunmamis": t.vekil_okunmamis, "sayfa": t.sayfa, "istek": t.istek, "sure_sn": t.sure_sn, "en_az": t.en_az,
-              "acik_toplam": acik}))
+              "acik_toplam": acik, "liste_zamani": liste_zamani}))
 }
 
 // ── Testler ─────────────────────────────────────────────────────────────────────────────────────
@@ -733,6 +895,17 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     assert_eq!((&satir(&l, d1)["rol_taraflar"], &satir(&l, d2)["rol_taraflar"]), (&json!(["X BANKASI A.Ş."]), &json!(["VELİ KARA"])));
     assert_eq!(al(c, &[("rol", "borclu")])["toplam"], 1);
     assert_eq!(al(c, &[("rol", "!borclu")])["toplam"], 2, "hariç: borçlu vekili olunan dosya dışındakiler");
+    // Tebligatlar sekmesinin "Rolümüz" süzgeci aynı hesabı kullanır.
+    let roller = avukat_rolleri(c).unwrap();
+    assert_eq!((roller.get(&d1).copied(), roller.get(&d2).copied()), (Some("alacakli"), Some("borclu")));
+    c.execute("INSERT INTO tebligat_barkod (dosya_id, birim_evrak_no, tebligat_turu, evrak_aciklama) VALUES ($1, 5, 'Ödeme Emri', 'Normal Tebligat[BORÇLU VELİ KARA]')",
+              &[&d2]).unwrap();
+    let q: HashMap<String, String> = [("rol".to_string(), "borclu".to_string())].into_iter().collect();
+    let t = crate::icra_tebligatlar::tebligat_listesi(c, &crate::icra_tebligatlar::Filtre::oku(&q)).unwrap();
+    assert_eq!((t["toplam"].as_i64(), t["satirlar"][0]["rol_etiket"].as_str()), (Some(1), Some("Borçlu vekili")));
+    let q: HashMap<String, String> = [("rol".to_string(), "alacakli".to_string())].into_iter().collect();
+    assert_eq!(crate::icra_tebligatlar::tebligat_listesi(c, &crate::icra_tebligatlar::Filtre::oku(&q)).unwrap()["toplam"].as_i64(), Some(0));
+    c.execute("DELETE FROM tebligat_barkod WHERE dosya_id = $1", &[&d2]).unwrap();
 
     // Açık / kapalı, kapanış aralığı, süzgeçler, sıralama
     assert_eq!(al(c, &[("durum", "acik")])["toplam"], 2);
@@ -758,9 +931,28 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     let t = istek_tahmini(c, &Filtre::oku(&q), "hepsi").unwrap();
     assert_eq!((&t["hedef"], &t["en_az"]), (&json!(2), &json!(true)), "tüm veriler yalnız açık dosyalara");
     assert!(istek_tahmini(c, &Filtre::oku(&q), "olmaz").is_err());
+    // Eksikler (liste yeniden alınmadan) "hepsi" ile aynı dosyalar
+    assert_eq!(dosya_kimlikleri(c, &Filtre::oku(&q), "eksik").unwrap(), dosya_kimlikleri(c, &Filtre::oku(&q), "hepsi").unwrap());
+    // Dosya listesinin en son alındığı zaman: kayıt yoksa son künye yazımı (yaklaşık), yazılınca kesin
+    let z = liste_zamani(c).unwrap();
+    assert_eq!(z["yaklasik"], true, "{z}");
+    assert_eq!(t["liste_zamani"]["yaklasik"], true);
+    liste_zamanini_yaz(c, 1234).unwrap();
+    let z = liste_zamani(c).unwrap();
+    assert_eq!((&z["yaklasik"], &z["alinan"]), (&json!(false), &json!(1234)));
+    assert_eq!(z["zaman"].as_str().unwrap().len(), 19, "{z}");
+    // Dosya türü sütunu ve dosya yılı süzgeci
+    let l = al(c, &[("yil", "2025")]);
+    assert_eq!((&l["toplam"], &l["satirlar"][0]["dosya_turu"]), (&json!(1), &json!("İcra Dosyası")));
+    assert_eq!(al(c, &[("yil", "2025\n2026")])["toplam"], 3);
+    assert_eq!(al(c, &[("acilis_yil", "2026"), ("acilis_ay", "10")])["toplam"], 2);
+    assert!(al(c, &[])["secenekler"]["dosya_tur"].as_array().unwrap().iter().any(|o| o["deger"] == "İcra Dosyası"));
 
-    c.batch_execute("DELETE FROM dosya; DELETE FROM taraf; DELETE FROM vekil; DELETE FROM birim; DELETE FROM buro_ayar WHERE anahtar = 'eimza_avukat'")
-        .unwrap();
+    c.batch_execute(
+        "DELETE FROM dosya; DELETE FROM taraf; DELETE FROM vekil; DELETE FROM birim;
+         DELETE FROM buro_ayar WHERE anahtar IN ('eimza_avukat', 'icra_liste_zamani')",
+    )
+    .unwrap();
 }
 
 #[cfg(test)]
@@ -814,7 +1006,7 @@ mod tests {
 
     fn satir(acik: bool, takip: bool, tum: bool, kimliksiz: bool) -> Satir {
         Satir {
-            dosya: 1, birim: String::new(), dosya_no: String::new(), yil: 2026, sira_no: 1, dosya_tur: String::new(), durum: String::new(),
+            dosya: 1, birim: String::new(), dosya_no: String::new(), yil: 2026, sira_no: 1, dosya_tur: String::new(), mts_kaynakli: false, durum: String::new(),
             acik, acilis: None, kapanis: None, kapanis_sebebi: String::new(), alacaklilar: vec![], borclular: vec![], rol: "",
             rol_taraflar: vec![], takip_turu: String::new(), takip_yolu: String::new(), takip_sekli: String::new(),
             takip_eksik: takip, taraf_tum: tum, taraf_kimliksiz: kimliksiz, vekil_okunmamis: false,
@@ -846,6 +1038,55 @@ mod tests {
         v[1].vekil_okunmamis = true;
         let t = tahmin_et(&v, "taraf", 1200).unwrap();
         assert_eq!((t.hedef, t.vekil_okunmamis, t.istek), (2, 2, 2 + 2 + 1));
+        // Eksikler (liste yeniden alınmadan): yalnız açık ve eksiği olan dosyalar; liste sayfası yok, bulma var
+        let mut e = vec![satir(true, true, false, false), satir(false, true, false, false), satir(true, false, false, false)];
+        e[2].vekil_okunmamis = true;
+        let t = tahmin_et(&e, "eksik", 1200).unwrap();
+        assert_eq!((t.dosya, t.hedef, t.takip, t.istek, t.en_az), (3, 2, 1, 2 + 1 + 1, false));
+    }
+
+    #[test]
+    fn yeni_sutunlar_ve_sira() {
+        let mut a = satir(true, false, false, false);
+        a.dosya_tur = "İcra Dosyası".into();
+        a.mts_kaynakli = true;
+        a.acilis = NaiveDate::from_ymd_opt(2025, 3, 14);
+        a.birim = "Ankara 1. İcra Dairesi".into();
+        assert_eq!(a.degerler(Sutun::DosyaTur), vec!["İcra Dosyası (MTS'den)".to_string()]);
+        assert_eq!(a.degerler(Sutun::Yil), vec!["2026".to_string()]);
+        assert_eq!((a.degerler(Sutun::AcilisYil), a.degerler(Sutun::AcilisAy)), (vec!["2025".to_string()], vec!["3".to_string()]));
+        assert_eq!(a.degerler(Sutun::KapanisYil), vec![String::new()]);
+        assert_eq!(Sutun::AcilisAy.etiket("3"), "Mart");
+        assert_eq!(Sutun::KapanisAy.etiket(""), "(tarihsiz)");
+        // Yıl / ay süzgeçleri kodlu: çoklu seçim (satır sonuyla) ve hariç
+        assert!(sutun_uyar(Sutun::AcilisAy, "3\n4", &a.degerler(Sutun::AcilisAy)));
+        assert!(!sutun_uyar(Sutun::AcilisYil, "2024", &a.degerler(Sutun::AcilisYil)));
+        assert!(!sutun_uyar(Sutun::Yil, "!2026", &a.degerler(Sutun::Yil)));
+
+        let mut b = a.clone();
+        b.dosya = 2;
+        b.birim = "İzmir 2. İcra Dairesi".into();
+        b.mts_kaynakli = false;
+        b.acilis = NaiveDate::from_ymd_opt(2024, 3, 1);
+        let q = |x: &[(&str, &str)]| Filtre::oku(&x.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect());
+        // Sırasız (eski kural): dosya türü seçenekleri daire süzgeciyle daralır
+        let f = q(&[("birim", "=Ankara 1. İcra Dairesi"), ("dosya_tur", "=İcra Dosyası")]);
+        let (gecen, sayim) = suz(vec![a.clone(), b.clone()], &f);
+        assert_eq!(gecen.len(), 0, "Ankara dosyası MTS'den, düz İcra Dosyası değil");
+        assert_eq!(sayim["dosya_tur"].keys().collect::<Vec<_>>(), vec!["İcra Dosyası (MTS'den)"]);
+        // Sıra: dosya türü önce, daire sonra → dosya türünün seçenekleri daireden bağımsız (üstteki alttakini kapsar)
+        let f = q(&[("birim", "=Ankara 1. İcra Dairesi"), ("dosya_tur", "=İcra Dosyası"), ("sira", "dosya_tur,birim,olmayan")]);
+        assert_eq!(f.sira, vec![Sutun::DosyaTur, Sutun::Birim]);
+        let (_, sayim) = suz(vec![a.clone(), b.clone()], &f);
+        assert_eq!(sayim["dosya_tur"].len(), 2);
+        // Daire seçenekleri yalnız üstteki süzgece (İcra Dosyası) uyanlardan: İzmir
+        assert_eq!(sayim["birim"].keys().collect::<Vec<_>>(), vec!["İzmir 2. İcra Dairesi"]);
+        // Kapanış süzgeçleri yalnız "Kapalı"da okunur
+        assert!(!q(&[("kapanis_yil", "2025")]).sutun.contains_key("kapanis_yil"));
+        assert!(q(&[("durum", "kapali"), ("kapanis_yil", "2025")]).sutun.contains_key("kapanis_yil"));
+        // Açılış ayı: yıldan bağımsız ("yalnız ay"): Mart → iki dosya
+        assert_eq!(suz(vec![a.clone(), b.clone()], &q(&[("acilis_ay", "3")])).0.len(), 2);
+        assert_eq!(suz(vec![a, b], &q(&[("acilis_ay", "3"), ("acilis_yil", "2024")])).0.len(), 1);
     }
 
     #[test]

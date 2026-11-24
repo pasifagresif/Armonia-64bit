@@ -853,6 +853,7 @@ impl UyapApp {
         let cfg = load_config();
         let (log_tx, log_rx) = mpsc::channel();
         *UI_LOG_TX.lock().unwrap() = Some(log_tx.clone());
+        std::thread::spawn(crate::paylas_win::udf_turunu_kaydet);
         let server_url = cfg.server_url.clone();
 
         let mut app = Self {
@@ -3188,6 +3189,8 @@ pub fn main() {
 
     // Uzak bilgisayarda cokluuyap.com'dan açılan UYAP'ın "Paylaş"ı belgeyi buraya verir (panoya, Ctrl+V).
     crate::yerel_yardimci::baslat();
+    // İmzalı güncelleme denetimi (src/guncelleme.rs): yayın derlemesinde 6 saatte bir; kurulum kullanıcı onayıyla.
+    crate::guncelleme::baslat();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

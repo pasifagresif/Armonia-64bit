@@ -126,7 +126,7 @@ pub fn paketle() -> Result<Vec<u8>, String> {
         let secenek = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
         let bilgi = format!(
             "Çoklu UYAP günlük paketi\nSürüm: {}\nOluşturulma: {}\nİşletim sistemi: {}\n",
-            env!("CARGO_PKG_VERSION"),
+            crate::surum::SURUM,
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
             std::env::consts::OS
         );
@@ -177,7 +177,7 @@ pub fn sunucuya_gonder(api_base: &str, kullanici: &str, ofis: &str, parola: &str
         "username": kullanici,
         "office_code": ofis,
         "password": parola,
-        "surum": env!("CARGO_PKG_VERSION"),
+        "surum": crate::surum::SURUM,
         "paket": base64::engine::general_purpose::STANDARD.encode(&veri),
     });
     let istemci = reqwest::blocking::Client::builder()

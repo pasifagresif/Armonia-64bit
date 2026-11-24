@@ -34,6 +34,9 @@ pub use runtime as _runtime;
 pub mod akis_pkcs11;
 pub mod cades;
 pub mod udf_converter;
+pub mod belge_disk;
+pub mod belge_veri;
+pub mod udf_alan;
 pub mod udf_pdf;
 pub mod paylas_win;
 pub mod pdf_birlestir;
@@ -48,12 +51,19 @@ pub mod yerel_yardimci;
 // @proxy modülleri
 pub mod hata_kodlari;
 pub mod sifreli_gunluk;
+pub mod surum;
+pub mod guncelleme_imza;
+pub mod guncelleme;
+pub mod yazi_sunucu;
 #[cfg(windows)]
 pub mod tepsi;
 pub mod is_listesi;
 pub mod is_otomatik;
 pub mod icra_tebligatlar;
 pub mod icra_dosyalar;
+pub mod icra_kesinlestirme;
+pub mod icra_listeler;
+pub mod icra_mernis;
 pub mod uyap_proxy;
 // Büro veritabanı (ofis bilgisayarında gömülü PostgreSQL) — 2026-11-15
 pub mod veritabani;

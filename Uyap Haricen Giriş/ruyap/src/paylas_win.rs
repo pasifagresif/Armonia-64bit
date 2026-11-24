@@ -48,6 +48,34 @@ pub fn panoya_kopyala(ad: &str, veri: &[u8]) -> Result<PathBuf, String> {
     Ok(yol)
 }
 
+/// `.udf` uzantısına dosya türü (`Content Type`) yazar (yalnız bu kullanıcı, HKCU; kullanıcı isteği 23.11.2026).
+/// UYAP Editör kaydında tür yok; UDF içeride ZIP olduğundan WhatsApp panodan yapıştırılan UDF'yi ZIP sanıp adına
+/// ".zip" ekliyordu ("x.udf.zip"). Var olan değer (başka bir program yazmışsa) ve dosya ilişkilendirmesi (hangi
+/// programla açıldığı) değiştirilmez. Açılışta arka planda çalışır; hata sessizce yutulur.
+pub fn udf_turunu_kaydet() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        const PENCERESIZ: u32 = 0x0800_0000; // CREATE_NO_WINDOW
+        const ANAHTAR: &str = r"HKCU\Software\Classes\.udf";
+        let var = Command::new("reg")
+            .args(["query", ANAHTAR, "/v", "Content Type"])
+            .creation_flags(PENCERESIZ)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if var {
+            return;
+        }
+        let tamam = Command::new("reg")
+            .args(["add", ANAHTAR, "/v", "Content Type", "/t", "REG_SZ", "/d", "application/x-udf", "/f"])
+            .creation_flags(PENCERESIZ)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        println!("[SİSTEM] .udf dosya türü kaydı {}.", if tamam { "yazıldı (WhatsApp \".udf.zip\" düzeltmesi)" } else { "yazılamadı" });
+    }
+}
+
 #[cfg(windows)]
 fn dosyayi_panoya_koy(yol: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
@@ -110,7 +138,11 @@ mod tests {
     #[test]
     #[ignore]
     fn pano_dene() {
-        // Panoya "Taşınmaz deneme.udf" koyar: cargo test --release --lib paylas_win::tests::pano_dene -- --ignored
+        // Panoya "Taşınmaz deneme.udf" koyar (kullanıcının panosunu ezer; `--include-ignored` toplu koşuda çalışmasın):
+        // PANO_DENE=1 cargo test --release --lib paylas_win::tests::pano_dene -- --ignored
+        if std::env::var_os("PANO_DENE").is_none() {
+            return;
+        }
         let yol = super::panoya_kopyala("Taşınmaz deneme.udf", b"deneme").unwrap();
         eprintln!("[pano] {:?}", yol);
     }

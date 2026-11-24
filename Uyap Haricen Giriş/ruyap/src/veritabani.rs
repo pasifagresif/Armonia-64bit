@@ -46,6 +46,13 @@ pub static SEMALAR: &[(i32, &str, &str)] = &[
     (10, "tebligat_grubu", include_str!("sema/0010_tebligat_grubu.sql")),
     (11, "elle_kesinlesme", include_str!("sema/0011_elle_kesinlesme.sql")),
     (12, "taraf_bilgisi_zamani", include_str!("sema/0012_taraf_bilgisi_zamani.sql")),
+    (13, "kesinlestirme", include_str!("sema/0013_kesinlestirme.sql")),
+    (14, "mazbata_bagi", include_str!("sema/0014_mazbata_bagi.sql")),
+    (15, "mernis", include_str!("sema/0015_mernis.sql")),
+    (16, "mazbata_teblig_tarihi", include_str!("sema/0016_mazbata_teblig_tarihi.sql")),
+    (17, "dosya_listesi", include_str!("sema/0017_dosya_listesi.sql")),
+    (18, "belge", include_str!("sema/0018_belge.sql")),
+    (19, "belge_yol", include_str!("sema/0019_belge_yol.sql")),
 ];
 
 pub type Gunluk = Arc<dyn Fn(&str) + Send + Sync>;
@@ -382,6 +389,17 @@ pub fn baslat(log: Gunluk) -> Result<(), String> {
     let uygulanan = sema_uygula(&mut istemci)?;
     if uygulanan > 0 {
         log(&format!("[VERİTABANI] Şema güncellendi ({uygulanan} adım)."));
+    }
+    // Büro belgeleri: eski içerik adresli depodakiler yargı türü / birim / dosya klasörlerine (bir kez)
+    match crate::belge_veri::eski_belgeleri_yerlestir(&mut istemci) {
+        Ok((0, h)) if h.is_empty() => {}
+        Ok((n, h)) => {
+            log(&format!("[VERİTABANI] {n} belge klasörlere taşındı."));
+            for e in h {
+                log(&format!("[VERİTABANI] Belge taşınamadı: {e}"));
+            }
+        }
+        Err(e) => log(&format!("[VERİTABANI] Belgeler klasörlere taşınamadı: {e}")),
     }
     HAVUZ.lock().push(istemci);
     *CALISAN.lock() = Some(calisan);
@@ -752,7 +770,10 @@ mod tests {
             crate::icra_guncelle::veritabani_senaryosu(&mut b);
             crate::is_veri::veritabani_senaryosu(&mut b);
             crate::is_otomatik::veritabani_senaryosu(&mut b);
+            crate::icra_kesinlestirme::veritabani_senaryosu(&mut b);
+            crate::icra_listeler::veritabani_senaryosu(&mut b);
             crate::is_veri::ek_senaryosu(&mut b);
+            crate::belge_veri::veritabani_senaryosu(&mut b);
             crate::is_aktar::veritabani_senaryosu(&mut b);
             crate::is_api::veritabani_senaryosu(&mut b);
             crate::is_isaret::veritabani_senaryosu(&mut b);

@@ -30,7 +30,17 @@ pub fn here_dir() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// MSI sürümü. Yayında `CU_SURUM` verilir (programın içindeki sürümle aynı olmalı: src/surum.rs); verilmezse
+/// derleme günü (yıl.ay.gün). MSI yalnız ilk üç parçayı karşılaştırır; aynı günün ikinci derlemesi
+/// AllowSameVersionUpgrades sayesinde yine üstüne kurulur.
 pub fn surum() -> String {
+    if let Ok(s) = std::env::var("CU_SURUM") {
+        let s = s.trim();
+        if crate::surum::parcalar(s).is_some() {
+            return s.to_string();
+        }
+        eprintln!("CU_SURUM geçersiz ({s:?}); derleme günü kullanılacak.");
+    }
     let t = chrono::Local::now().date_naive();
     format!("{}.{}.{}", t.year() % 100, t.month(), t.day())
 }
@@ -264,13 +274,16 @@ pub fn urun_wxs(ad: &str, exe: &str, surum_str: &str, upgrade: &str) -> String {
 
 pub fn main() {
     let here = here_dir();
-    let src = here.join("dist").join("CokluUyap");
-    let build = here.join("build");
-    let msi = here.join("dist").join("CokluUyapKur.msi");
-    let wix = here.join("araclar").join("wix311");
+    // 2026-11-23: Rust paketi (araclar/yayin_hazirla.py) kaynak klasörü ve çıktı dosyasını ortam değişkeniyle verir;
+    // verilmezse eski Python düzeni (dist/CokluUyap → dist/CokluUyapKur.msi).
+    let ortam = |k: &str| std::env::var(k).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let src = ortam("CU_MSI_KAYNAK").unwrap_or_else(|| here.join("dist").join("CokluUyap"));
+    let msi = ortam("CU_MSI_CIKTI").unwrap_or_else(|| here.join("dist").join("CokluUyapKur.msi"));
+    let build = msi.parent().map(|p| p.join("build-msi")).unwrap_or_else(|| here.join("build"));
+    let wix = ortam("CU_WIX").unwrap_or_else(|| here.join("araclar").join("wix311"));
 
     if !src.is_dir() {
-        eprintln!("dist/CokluUyap yok — önce cokluuyap_app.spec derleyin.");
+        eprintln!("{} yok — önce paketi hazırlayın (araclar/yayin_hazirla.py).", src.display());
         std::process::exit(1);
     }
     let exe_path = src.join(EXE_ADI);
@@ -376,8 +389,11 @@ SmartScreen yanlış pozitif verebilir (bkz. dosya başındaki UYAP_IMZA_*)."
         size_mb,
         v
     );
-    println!(
-        "Dağıtım: MSI'yı downloads/CokluUyapKur.msi olarak kopyalayıp \
+    // Güncelleme yayınında (CU_MSI_CIKTI) dağıtımı araclar/yayin_hazirla.py anlatır.
+    if std::env::var("CU_MSI_CIKTI").is_err() {
+        println!(
+            "Dağıtım: MSI'yı downloads/CokluUyapKur.msi olarak kopyalayıp \
 vendor_deploy'a commit + PUSH edin."
-    );
+        );
+    }
 }

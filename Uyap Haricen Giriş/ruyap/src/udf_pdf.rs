@@ -1862,6 +1862,9 @@ pub fn udf_zip_mi(ham_bayt: &[u8]) -> bool {
 
 /// UDF baytlarından PDF üretir, PDF baytlarını döner.
 pub fn udf_pdf_uret(ham_bayt: &[u8]) -> Result<Vec<u8>, String> {
+    // Portal belgelerinde alanlar metinde adıyla durur, değerler <data>'da: önce yerleştir (udf_alan.rs)
+    let dolu = crate::udf_alan::doldur_ya_da_asil(ham_bayt);
+    let ham_bayt: &[u8] = &dolu;
     let xml_str = {
         let mut z = ZipArchive::new(Cursor::new(ham_bayt))
             .map_err(|e| format!("UDF ZIP açılamadı: {}", e))?;

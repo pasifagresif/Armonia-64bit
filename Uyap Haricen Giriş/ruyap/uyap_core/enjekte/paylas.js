@@ -29,6 +29,7 @@
     const YOL_PDF = 'M20 2H8', YOL_INDIR = 'M5 20h14';
     const PAYLAS_SVG = 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92';
     const INDIR_SVG = 'M5 20h14v-2H5zM19 9h-4V3H9v6H5l7 7z';
+    const YAZI_SVG = 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z';
     const TURLER = { pdf: 'application/pdf', udf: 'application/octet-stream', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
                      tif: 'image/tiff', tiff: 'image/tiff', txt: 'text/plain', html: 'text/html', htm: 'text/html', rtf: 'application/rtf' };
     const MIME_UZANTI = { 'text/udf': 'udf', 'application/pdf': 'pdf', 'image/tiff': 'tif', 'image/png': 'png', 'image/jpeg': 'jpg',
@@ -387,13 +388,31 @@
         const ad = temizAd((no && bas.indexOf(no) < 0 ? no + ' ' : '') + bas) + (u ? '.' + u : '');
         return ad === f.name ? f : new File([f], ad, { type: f.type || tur(ad) });
     }
+    // Portal belgelerinde (ör. Avukat Portal Genel Talebi) alanlar metinde ADIYLA durur, değerler UDF içindeki
+    // ayrı <data> bölümünde; UYAP'ın ekranı birleştirir, başka her şey alan adını gösterir. Program değerleri
+    // metne yerleştirir (udf_alan.rs). İçerik değiştiği için bu kopyada e-imza yoktur; imzalı asıl UYAP'ın
+    // kendi "İndir" düğmesinde. Program yoksa ya da alan yoksa dosya olduğu gibi kalır.
+    let doldurmaBildirildi = false;
+    async function alanlariDoldur(f) {
+        if (uzanti(f.name) !== 'udf') return f;
+        try {
+            const r = await fetch('/__uyap_yerel__/udf_doldur', { method: 'POST', body: f, credentials: 'include', cache: 'no-store' });
+            if (r.status !== 200) return f;
+            const dolu = new File([await r.blob()], f.name, { type: f.type || tur(f.name) });
+            if (!doldurmaBildirildi && window.__uyapBildirim) {
+                doldurmaBildirildi = true;
+                window.__uyapBildirim('Alan değerleri belgeye yerleştirildi. Bu kopyada e-imza yok; imzalı asıl için UYAP\'ın kendi "İndir" düğmesini kullanın.');
+            }
+            return dolu;
+        } catch (x) { return f; }
+    }
     async function orjAl(k, d) {
         if (d.orj) return d.orj;
         let s = null;
         if (k.orjDugme) s = await yakala(k.orjDugme);
         else if (d.idb && idbUzanti(d.idb) !== 'pdf') s = { f: kayittanDosya(d.idb, k.baslik) };
         if (!s) throw new Error('Bu belgenin aslı alınamadı.');
-        const o = { f: adlandir(s.f, k) };
+        const o = { f: adlandir(await alanlariDoldur(s.f), k) };
         if (!d.gecici) d.orj = o;
         return o;
     }
@@ -437,7 +456,7 @@
             + 'font:600 12.5px/1 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;transition:filter .1s,background .1s;'
             + 'color:var(--cu-vurgu-koyu,var(--cu-vurgu,#1d4ed8));background:var(--cu-t-yuzey,#fff);border:1px solid var(--cu-vurgu-kenar,rgba(var(--cu-vurgu-rgb,37,99,235),.45))}'
             + '.cu-bk button:hover{background:var(--cu-vurgu-zemin,rgba(var(--cu-vurgu-rgb,37,99,235),.1))}'
-            + '.cu-bk button.cu-bk-paylas{color:var(--cu-vurgu-yazi,#fff);background:var(--cu-vurgu,#2563eb);border-color:var(--cu-vurgu,#2563eb)}'
+            + '.cu-bk button.cu-bk-paylas{color:var(--cu-vurgu-uzeri,#fff);background:var(--cu-vurgu,#2563eb);border-color:var(--cu-vurgu,#2563eb)}'
             + '.cu-bk button.cu-bk-paylas:hover{filter:brightness(1.1)}'
             + '.cu-bk button.cu-bk-tamam,.cu-bk button.cu-bk-tamam:disabled{color:var(--cu-vurgu-yazi,#fff);background:var(--cu-vurgu-koyu,var(--cu-vurgu,#1d4ed8));border-color:var(--cu-vurgu-koyu,var(--cu-vurgu,#1d4ed8));opacity:1}'
             + '.cu-bk button:focus-visible{outline:2px solid var(--cu-vurgu,#2563eb);outline-offset:2px}'
@@ -449,7 +468,7 @@
             + 'opacity:0;transform:translateY(-6px) scale(.97);transition:opacity .2s,transform .2s}'
             + '#cu-pano-uyari.cu-pu-acik{opacity:1;transform:none}'
             + '#cu-pano-uyari .cu-pu-ic{display:flex;gap:11px;align-items:flex-start;padding:12px 14px}'
-            + '#cu-pano-uyari .cu-pu-simge{flex:none;width:28px;height:28px;border-radius:50%;background:var(--cu-vurgu,#2563eb);color:var(--cu-vurgu-yazi,#fff);'
+            + '#cu-pano-uyari .cu-pu-simge{flex:none;width:28px;height:28px;border-radius:50%;background:var(--cu-vurgu,#2563eb);color:var(--cu-vurgu-uzeri,#fff);'
             + 'display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px}'
             + '#cu-pano-uyari .cu-pu-metin{display:flex;flex-direction:column;gap:3px;min-width:0}'
             + '#cu-pano-uyari b{font-size:14px;color:var(--cu-vurgu-koyu,var(--cu-vurgu,#1d4ed8))}'
@@ -502,7 +521,20 @@
         pi.title = 'PDF olarak kaydet';
         pp.title = kopyalar ? 'PDF olarak kopyalar — WhatsApp, Outlook, klasör… nereye isterseniz Ctrl+V ile yapıştırın'
             + (buBilgisayar() ? '' : ' (bu bilgisayarda Çoklu UYAP açık değilse indirilir)') : 'PDF olarak paylaş';
-        g1.appendChild(oi); g1.appendChild(op); g2.appendChild(pi); g2.appendChild(pp);
+        // Armonia Yazı (enjekte/yazi.js): UDF belgesini UYAP ekranının yanındaki editör penceresinde açar.
+        const oy = dugme('cu-bk-indir cu-bk-yazi', YAZI_SVG);
+        yaz(oy, "Yazı'da aç");
+        oy.title = "Armonia Yazı'da aç: belge yanında açılır, okurken yazabilirsiniz (Alt+1…0 çoklu pano)";
+        oy.addEventListener('click', calis(oy, 'Açılıyor…', async function() {
+            const [x, d] = k();
+            if (window.__cuYaziDosyaAc) {
+                // Belgenin dosyası (kart verisi): editör o dosyaya bağlanır, imzalanan belge oraya gönderilebilir
+                let v = null;
+                try { const kart = x.kapEl && x.kapEl.closest && x.kapEl.closest('.dosya-sorgula-popup'); v = kart && window.__uyapKartVerisi ? window.__uyapKartVerisi(kart) : null; } catch (e) {}
+                window.__cuYaziDosyaAc((await orjAl(x, d)).f, v);
+            }
+        }));
+        g1.appendChild(oi); g1.appendChild(op); g1.appendChild(oy); g2.appendChild(pi); g2.appendChild(pp);
         const ay = document.createElement('span'); ay.className = 'cu-bk-ayrac';
         c.appendChild(g1); c.appendChild(ay); c.appendChild(g2);
         const k = function() { const x = kaynak(); return [x, durum(x)]; };
@@ -527,6 +559,8 @@
         c.querySelector('.cu-bk-ayrac').style.display = ov && pv ? '' : 'none';
         const et = etiketi(orjUzanti(k, d));
         const [oi, op] = g1.querySelectorAll('button');
+        const oy = g1.querySelector('.cu-bk-yazi');
+        if (oy) oy.hidden = !(window.__cuYaziDosyaAc && orjUzanti(k, d) === 'udf');
         if (!oi.disabled) yaz(oi, et + ' İndir');
         if (!op.disabled) yaz(op, et + ' Paylaş');
         c.style.display = ov || pv ? '' : 'none';

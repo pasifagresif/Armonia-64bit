@@ -68,6 +68,9 @@ pub fn kesinlesme_hesapla(teblig_tarihi: NaiveDate, sure_gun: i64, tatiller: &Ta
 
 // ── Ödeme emri tebligatı ────────────────────────────────────────────────────────────────────────
 
+/// Elle bağlanan mazbatada tebliğ tarihi girilmiş fiziki tebligatın hesaptaki PTT durumu ("teslim edildi" içerir).
+pub const MAZBATADAN_TESLIM: &str = "TESLİM EDİLDİ (mazbatadaki tarih)";
+
 /// Borçluya bağlı bir ödeme emri tebligatı (`tebligat_barkod` satırının hesapta kullanılan alanları).
 #[derive(Clone, Debug, Default)]
 pub struct OdemeEmri {
@@ -318,7 +321,7 @@ pub fn takip_asamasi_hesapla(
     if kes == K::Itiraz.kod() {
         return (A::Itiraz, b.itiraz_tarihi);
     }
-    if kes.starts_with("durd_") {
+    if kes.starts_with("durd_") || kes == K::TehiriIcra.kod() {
         return (A::Durduruldu, None);
     }
     if b.tebligat_durumu == T::TebligEdildi.kod() {
@@ -484,7 +487,7 @@ pub struct Sonuc {
 /// Borçluların kesinleşme, tebliğ durumu ve takip aşamasını kayıtlı tebligatlardan hesaplayıp
 /// yazar. `dosya` verilirse yalnız o dosyanın borçluları; verilmezse tebligatı, durdurması,
 /// itirazı olan ya da takip aşaması henüz yazılmamış bütün icra borçluları. Elle girilen
-/// Konkordato / Vefat / Vasi değerleri ezilmez. `bugun` sürenin dolup dolmadığını belirler.
+/// Konkordato / Vefat / Vasi / Tehir-i İcra değerleri ezilmez. `bugun` sürenin dolup dolmadığını belirler.
 pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun: NaiveDate, log: kayit::Gunluk) -> Result<Sonuc, String> {
     let mut tx = c.transaction().map_err(hata)?;
     let duzeltilen = tebligat_borclularini_duzelt(&mut tx, dosya)?;
@@ -499,26 +502,38 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
     let kurallar = veri::kesinlesme_kurallari(&mut tx)?;
     let evraklar = odeme_emri_evraklari(&mut tx, dosya)?;
 
+    let vekiller = kayit::borclu_vekil_haritasi(&mut tx, dosya)?;
     let mut odeme_emirleri: HashMap<i64, Vec<OdemeEmri>> = HashMap::new();
     for s in tx
         .query(
-            "SELECT borclu_id, birim_evrak_no, evrak_aciklama, evrak_tarihi, evrak_gunu, barkod, elektronik_tebligat,
-                    ptt_durumu, son_islem_tarihi, son_islem_zamani::date, teslim_sekli, tebligat_mazbatasi_var,
-                    tebligat_mazbatasi_aciklama
-               FROM tebligat_barkod
-              WHERE tebligat_turu = ANY($2) AND borclu_id IS NOT NULL AND ($1::bigint IS NULL OR dosya_id = $1)
-              ORDER BY id",
+            "SELECT tb.borclu_id, tb.birim_evrak_no, tb.evrak_aciklama, tb.evrak_tarihi, tb.evrak_gunu, tb.barkod,
+                    tb.elektronik_tebligat, tb.ptt_durumu, tb.son_islem_tarihi, tb.son_islem_zamani::date, tb.teslim_sekli,
+                    tb.tebligat_mazbatasi_var, tb.tebligat_mazbatasi_aciklama, tb.dosya_id, mb.teblig_tarihi
+               FROM tebligat_barkod tb
+               LEFT JOIN tebligat_mazbata_bagi mb ON mb.dosya_id = tb.dosya_id AND mb.tebligat_evrak_no = tb.birim_evrak_no
+              WHERE tb.tebligat_turu = ANY($2) AND ($1::bigint IS NULL OR tb.dosya_id = $1)
+              ORDER BY tb.id",
             &[&dosya, &KESINLESME_TEBLIGATLARI.to_vec()],
         )
         .map_err(hata)?
     {
+        let aciklama: String = s.get(2);
         // Üçüncü kişiye giden zarf (borçlu tek diye borçluya bağlanmış olabilir) borçlunun tebliği ve kesinleşmesi değildir.
-        if teb::muhatap_turu(&s.get::<_, String>(2)) == teb::MuhatapTuru::Ucuncu {
+        if teb::muhatap_turu(&aciklama) == teb::MuhatapTuru::Ucuncu {
             continue;
         }
-        odeme_emirleri.entry(s.get(0)).or_default().push(OdemeEmri {
+        // Borçluya bağlı değilse: vekile giden zarf vekilin temsil ettiği bütün borçluların tebliğidir (vekil birden çok
+        // borçlunun vekiliyken zarf tek borçluya bağlanamıyor, borçlular "tebliğ bekleniyor"da kalıyordu).
+        let sahipler: Vec<i64> = match s.get::<_, Option<i64>>(0) {
+            Some(b) => vec![b],
+            None => teb::vekilin_borclulari(&aciklama, vekiller.get(&s.get::<_, i64>(13)).map(Vec::as_slice).unwrap_or(&[])),
+        };
+        if sahipler.is_empty() {
+            continue;
+        }
+        let mut oe = OdemeEmri {
             birim_evrak_no: s.get(1),
-            evrak_aciklama: s.get(2),
+            evrak_aciklama: aciklama,
             evrak_tarihi: s.get(3),
             evrak_gunu: s.get(4),
             barkod: s.get(5),
@@ -529,7 +544,19 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
             teslim_sekli: s.get(10),
             tebligat_mazbatasi_var: s.get(11),
             tebligat_mazbatasi_aciklama: s.get(12),
-        });
+        };
+        // Elle bağlanan mazbatadaki tebliğ günü (kullanıcı girdi): PTT'nin bilgisi yerine geçer (eski barkod PTT'de silinmiş).
+        if let Some(t) = s.get::<_, Option<NaiveDate>>(14).filter(|_| !oe.elektronik_tebligat) {
+            oe.ptt_durumu = MAZBATADAN_TESLIM.into();
+            oe.son_islem_gunu = Some(t);
+            oe.son_islem_tarihi = t.format("%d/%m/%Y").to_string();
+            if oe.teslim_sekli.is_empty() {
+                oe.teslim_sekli = "Mazbatadaki tebliğ tarihi (elle)".into();
+            }
+        }
+        for b in sahipler {
+            odeme_emirleri.entry(b).or_default().push(oe.clone());
+        }
     }
 
     let borclular = tx
@@ -538,7 +565,7 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
                     dt.tebligat_durumu, dt.tebligat_durum_tarihi, dt.tebligat_sekli, dt.takip_asamasi,
                     dt.takip_asamasi_tarihi, d.durum, d.yargi_turu,
                     COALESCE(i.takibin_turu, ''), COALESCE(i.takibin_yolu, ''), COALESCE(i.takibin_sekli, ''), d.tur_kod, d.tur,
-                    dt.kesinlesme_elle_tarihi
+                    dt.kesinlesme_elle_tarihi, dt.uyap_kesinlesti, dt.uyap_kesinlesti_gunu
                FROM dosya_taraf dt JOIN dosya d ON d.id = dt.dosya_id
                LEFT JOIN icra_takip_detay i ON i.dosya_id = d.id
               WHERE dt.rol = 'borclu'
@@ -547,7 +574,7 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
                          AND (EXISTS (SELECT 1 FROM tebligat_barkod tb WHERE tb.dosya_id = d.id)
                               OR d.durum LIKE '%Durdurulmuş%'
                               OR dt.kesinlesme_durumu = 'itiraz' OR dt.kesinlesme_durumu LIKE 'durd\\_%'
-                              OR dt.kesinlesme_elle_tarihi IS NOT NULL
+                              OR dt.kesinlesme_elle_tarihi IS NOT NULL OR dt.uyap_kesinlesti
                               OR (d.yargi_turu = 2 AND dt.takip_asamasi = ''))))
               ORDER BY dt.id",
             &[&dosya],
@@ -555,7 +582,7 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
         .map_err(hata)?;
 
     let icra = veri::YargiTuru::Icra.kod();
-    let elle = [K::Konkordato.kod(), K::Vefat.kod(), K::Vasi.kod()];
+    let elle = [K::Konkordato.kod(), K::Vefat.kod(), K::Vasi.kod(), K::TehiriIcra.kod()];
     let bos: Vec<OdemeEmri> = Vec::new();
     let (mut kuralsiz, mut tanimsiz) = (BTreeSet::new(), BTreeSet::new());
     let mut sonuc = Sonuc::default();
@@ -599,6 +626,15 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
         // Kullanıcının girdiği kesinleşme günü hesabı ezer (etkili itiraz ve durdurma hariç).
         if let Some(t) = s.get::<_, Option<NaiveDate>>(18).filter(|_| !talimat && !itiraz_etkili && durdurma.is_none()) {
             (yeni.kesinlesme_durumu, yeni.kesinlesme_tarihi) = (elle_kesinlesme(t, bugun).into(), Some(t));
+        }
+        // UYAP'ta takip kesinleşmiş görüldüyse (Kesinleştirme sekmesindeki sorgu / talep öncesi denetim) Kesinleşti:
+        // programın hesabı ve itiraz işareti ezilir (kullanıcı kuralı 23.11.2026; eski PTT barkodu sorgulanamadığı için
+        // tebliğ günü bulunamayan borçlu "bekliyor"da kalıyordu). Gün: hesaplanan kesinleşme günü UYAP'ta görüldüğü
+        // günden sonra değilse o, değilse ilk görüldüğü gün.
+        if s.get::<_, Option<bool>>(19) == Some(true) && !talimat && durdurma.is_none() {
+            let gorulen: Option<NaiveDate> = s.get(20);
+            let gun = yeni.kesinlesme_tarihi.filter(|t| gorulen.map_or(true, |g| *t <= g)).or(gorulen);
+            (yeni.kesinlesme_durumu, yeni.kesinlesme_tarihi) = (K::Kesinlesti.kod().into(), gun);
         }
         if elle.contains(&eski.kesinlesme_durumu.as_str()) && (!itiraz_etkili || talimat) {
             (yeni.kesinlesme_durumu, yeni.kesinlesme_tarihi) = (eski.kesinlesme_durumu.clone(), eski.kesinlesme_tarihi);
@@ -958,6 +994,51 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     assert_eq!(s.otomatik_is, 0, "talimatta kesinleşme kontrol işi açılmaz");
     assert!(!uyarilar.borrow().iter().any(|m| m.contains("Kesinleşme süresi")), "{uyarilar:?}");
     assert!(talimat_mi(1, "") && talimat_mi(0, "Talimat Dosyası") && !talimat_mi(35, "İcra Dosyası"));
+
+    // ── 23.11.2026: vekile giden e-tebligat (vekil iki borçlunun), mazbatadaki tebliğ tarihi, UYAP kesinleşmesi ──
+    let (dv, _) = dosya_kunyesi_kaydet(c, &kunye("2026/88", 1001, "İzmir 1. İcra Dairesi"), Some(YargiTuru::Icra.kod())).unwrap();
+    let ucu = ["ALİ VELİ", "AYŞE VELİ", "CEM KARA"].map(|a| json!({"adi": a, "rol": "Borçlu", "kisiKurum": "Kişi"}));
+    kayit::dosya_taraf_kaydet(c, dv, &ucu, &sessiz).unwrap();
+    let bb: Vec<i64> = c.query("SELECT id FROM dosya_taraf WHERE dosya_id = $1 AND rol = 'borclu' ORDER BY sira, id", &[&dv]).unwrap()
+        .iter().map(|r| r.get(0)).collect();
+    let (ali, ayse, cem) = (bb[0], bb[1], bb[2]);
+    let vk: i64 = c.query_one("INSERT INTO vekil (ad, soyad) VALUES ('ZEYNEP', 'AK') RETURNING id", &[]).unwrap().get(0);
+    for b in [ali, ayse] {
+        c.execute("INSERT INTO dosya_taraf_vekiller (dosyataraf_id, vekil_id) VALUES ($1, $2)", &[&b, &vk]).unwrap();
+    }
+    for (no, ack, barkod, e, ptt, son) in [
+        (20, "Elektronik Tebligat[Vekil ZEYNEP AK]", "5000000000001", true, "E-Tebligat: tebliğ edildi (süre 5 gün sonra başlar)", "01/10/2026"),
+        (21, "Normal Tebligat[BORÇLU CEM KARA]", "4000000000002", false, "KAYIT YOK", ""),
+    ] {
+        let id: i64 = c.query_one(
+            "INSERT INTO tebligat_barkod (dosya_id, birim_evrak_no, tebligat_turu, evrak_tarihi, evrak_aciklama, barkod, elektronik_tebligat, ptt_durumu, son_islem_tarihi)
+             VALUES ($1, $2, 'Ödeme Emri', '01/10/2026', $3, $4, $5, $6, $7) RETURNING id",
+            &[&dv, &no, &ack, &barkod, &e, &ptt, &son],
+        ).unwrap().get(0);
+        ham_tarihleri_turet(c, "tebligat_barkod", id).unwrap();
+    }
+    kayit::evrak_listesi_kaydet(c, dv, &[json!({"birimEvrakNo": 22, "tur": "Tebliğ Mazbatası", "aciklama": "", "onaylandigiTarih": "10/10/2026"})]).unwrap();
+    let kes = |c: &mut postgres::Client, b: i64| -> (String, Option<NaiveDate>) {
+        c.query_one("SELECT kesinlesme_durumu, kesinlesme_tarihi FROM dosya_taraf WHERE id = $1", &[&b]).map(|r| (r.get(0), r.get(1))).unwrap()
+    };
+    let bugun = g(2026, 11, 1);
+    durumlari_guncelle(c, Some(dv), bugun, &sessiz).unwrap();
+    assert_eq!(say(c, "SELECT count(*) FROM tebligat_barkod WHERE birim_evrak_no = 20 AND borclu_id IS NULL"), 1, "iki aday: zarf bağlanmaz");
+    assert_eq!((kes(c, ali).0.as_str(), kes(c, ayse).0.as_str()), ("kesinlesti", "kesinlesti"), "vekile tebliğ iki borçluya da sayılır");
+    assert_eq!(kes(c, cem), ("kesinlesme_bekliyor".into(), None), "PTT'de kayıt yok: tebliğ günü yok");
+    // Mazbata bağlanırken mazbatadaki tebliğ tarihi girilir → kesinleşme o günden.
+    assert!(crate::icra_api::mazbata_bagla_tarihli(c, dv, 21, Some(22), Some(g(2026, 12, 1)), bugun).unwrap_err().contains("bugünden sonra"));
+    crate::icra_api::mazbata_bagla_tarihli(c, dv, 21, Some(22), Some(g(2026, 10, 8)), bugun).unwrap();
+    let k = kes(c, cem);
+    assert!(k.0 == "kesinlesti" && k.1.is_some_and(|t| t > g(2026, 10, 8) && t < g(2026, 10, 25)), "{k:?}");
+    // Bağ kaldırılınca bekliyor; UYAP'ta kesinleşmiş görülünce Kesinleşti (gün: görüldüğü gün), görülmeyince geri döner.
+    crate::icra_api::mazbata_bagla(c, dv, 21, None, bugun).unwrap();
+    assert_eq!(kes(c, cem).0, "kesinlesme_bekliyor");
+    crate::icra_kesinlestirme::kesinlesme_isaretle(c, cem, true, bugun).unwrap();
+    assert_eq!(kes(c, cem), ("kesinlesti".into(), Some(bugun)));
+    crate::icra_kesinlestirme::kesinlesme_isaretle(c, cem, false, bugun).unwrap();
+    assert_eq!(kes(c, cem).0, "kesinlesme_bekliyor");
+    c.batch_execute("DELETE FROM vekil").unwrap();
 
     c.batch_execute("DELETE FROM dosya; DELETE FROM taraf; DELETE FROM birim; DELETE FROM kesinlesme_kurali").unwrap();
 }

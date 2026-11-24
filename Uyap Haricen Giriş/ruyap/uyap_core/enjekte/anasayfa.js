@@ -272,7 +272,10 @@
     }
     function bannerYuksekligi() {
         const nav = document.querySelector('.u-navbar');
-        if (nav) degiskenYaz('--cu-ana-zemin', getComputedStyle(nav).backgroundColor);
+        // Deri temalarında üst çubuk artık açık yüzeyli (tema.css, 2026-11-23); banner beyaz yazılı düğmeleriyle
+        // temanın dolu rengini (--cu-t-ust) korur. UYAP / Koyu temalarında eskisi gibi üst çubuğun rengi.
+        if (document.documentElement.hasAttribute('data-cu-deri')) degiskenYaz('--cu-ana-zemin', 'var(--cu-t-ust)');
+        else if (nav) degiskenYaz('--cu-ana-zemin', getComputedStyle(nav).backgroundColor);
         if (!panel) return;
         const db = document.querySelector('.dash-back');
         const ust = db ? db.getBoundingClientRect().top : 60;

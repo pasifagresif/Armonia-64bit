@@ -25,10 +25,23 @@
 //!   GET  hatirlaticilar       ?gorev=  — kişinin bekleyen hatırlatıcıları (plan L6)
 //!   POST hatirlatici          {gorev_id, zaman: "YYYY-AA-GGTSS:DD", notu} → {id}  (kişi kendine kurar)
 //!   POST hatirlatici_sil · hatirlatici_tamam {id} · hatirlatici_ertele {id, dakika}
+//!   POST onay_hatirlat        {gorev, notu} → {kime: [ad]}  (onayda işin onaylayıcısına anında hatırlatma)
+//!
+//!
+//! Belgeler (belge_veri.rs, 24.11.2026 — Armonia Yazı'nın büro deposu):
+//!   GET  belge_liste          ?dosya=&gorev=&ara=&klasor=&tumu=0|1   GET belge ?id=   GET dosya_ara ?ara=
+//!   GET  belge_agac           ?tumu=0|1  (yargı türü → birim → dosya klasörleri + sayılar)
+//!   POST belge_adlandir {id, ad} → {ad}
+//!   GET  belge_indir          ?id=&surum=  (ham bayt)
+//!   POST belge_kaydet         ?id=&surum=&ad64=&bicim=&dosya=&gorev=&imzali=1&not64=&kart64=  (gövde = belge)
+//!   POST belge_dosya {id, dosya_id} · belge_ise_ekle / belge_isten_cikar {belge, gorev}
+//!   POST belge_onaya_sun {belge, gorev?, onaylayici?, not} → {gorev} · belge_gonderildi {id, tur, tur_adi, mesaj}
+//!   POST belge_sil {id}
 //!
 //! `ozet` (sayfa dakikada bir yoklar): sayaçlar + `yeni`/`yeni_isler` (başkasının açtığı, bakılmamış işler)
 //! + `hatirlatma`/`hatirlatma_sayi` (zamanı gelmiş hatırlatıcılar). Hepsi ofiste kalır; buluta gitmez.
 
+use crate::belge_veri as bv;
 use crate::is_veri::{self as iv, Kisi};
 use chrono::NaiveDate;
 use postgres::GenericClient;
@@ -174,6 +187,7 @@ fn dagit<C: GenericClient>(
             let simdi = chrono::Local::now().naive_local();
             json!({"id": iv::hatirlatici_kur(c, &k, sayi(&g["gorev_id"]), zaman_coz(&metin(g, "zaman"))?, &metin(g, "notu"), simdi)?})
         }
+        ("POST", "onay_hatirlat") => json!({"kime": iv::onay_hatirlat(c, &k, tam(g, "gorev")?, &metin(g, "notu"))?}),
         ("POST", "hatirlatici_sil") => {
             iv::hatirlatici_sil(c, &k, tam(g, "id")?)?;
             Value::Null
@@ -240,6 +254,57 @@ fn dagit<C: GenericClient>(
         }
         ("POST", "sablon") => json!({"id": iv::sablon_kaydet(c, &k, g)?}),
         ("POST", "tekrar") => json!({"id": iv::tekrar_kurali_ekle(c, &k, g)?}),
+        // Belgeler
+        ("GET", "belge_liste") => {
+            // UYAP kart verisi (kart64) verilmişse dosya ondan bulunur; büro veritabanında yoksa liste boş
+            let kart = serde_json::from_str::<Value>(&b64_metin(q, "kart64")).ok().filter(|v| v.is_object());
+            let dosya = match (qi("dosya"), kart) {
+                (Some(d), _) => Some(d),
+                (None, Some(kv)) => match bv::karttan_dosya(c, &kv)? {
+                    Some(d) => Some(d),
+                    None => return Ok(Some(json!([]))),
+                },
+                (None, None) => None,
+            };
+            // tumu=1 bütün görebildikleri, 0 "Belgelerim"; verilmezse eski davranış (yönetici aramıyorsa kendi belgeleri)
+            let tumu = match qs("tumu").as_str() {
+                "1" => true,
+                "0" => false,
+                _ => !k.yonetici || !qs("ara").trim().is_empty(),
+            };
+            json!(bv::liste(c, &k, dosya, qi("gorev"), &qs("ara"), &qs("klasor"), tumu)?)
+        }
+        ("GET", "belge_agac") => bv::agac(c, &k, qs("tumu") == "1")?,
+        ("POST", "belge_adlandir") => json!({"ad": bv::yeniden_adlandir(c, &k, tam(g, "id")?, &metin(g, "ad"))?}),
+        ("GET", "kart_dosya") => {
+            let kart = serde_json::from_str::<Value>(&b64_metin(q, "kart64")).ok().filter(|v| v.is_object());
+            json!({"dosya_id": match kart { Some(kv) => bv::karttan_dosya(c, &kv)?, None => None }})
+        }
+        ("GET", "belge") => bv::getir(c, &k, qi("id").ok_or("'id' eksik.")?)?,
+        ("GET", "dosya_ara") => json!(bv::dosya_ara(c, &qs("ara"))?),
+        ("POST", "belge_dosya") => {
+            bv::dosya_bagla(c, &k, tam(g, "id")?, sayi(&g["dosya_id"]))?;
+            json!({})
+        }
+        ("POST", "belge_ise_ekle") => {
+            bv::ise_ekle(c, &k, tam(g, "belge")?, tam(g, "gorev")?)?;
+            json!({})
+        }
+        ("POST", "belge_isten_cikar") => {
+            bv::isten_cikar(c, &k, tam(g, "belge")?, tam(g, "gorev")?)?;
+            json!({})
+        }
+        ("POST", "belge_onaya_sun") => {
+            json!({"gorev": bv::onaya_sun(c, &k, tam(g, "belge")?, sayi(&g["gorev"]), sayi(&g["onaylayici"]), &metin(g, "not"), bugun)?})
+        }
+        ("POST", "belge_gonderildi") => {
+            bv::gonderildi(c, &k, tam(g, "id")?, &metin(g, "tur"), &metin(g, "tur_adi"), &metin(g, "mesaj"))?;
+            json!({})
+        }
+        ("POST", "belge_sil") => {
+            bv::sil(c, &k, tam(g, "id")?)?;
+            json!({})
+        }
         ("POST", "tekrar_durdur") => {
             iv::tekrar_kurali_durdur(c, &k, tam(g, "id")?, g["aktif"].as_bool().unwrap_or(false))?;
             Value::Null
@@ -269,6 +334,9 @@ pub async fn handle(method: &str, path: &str, query: &str, body: &[u8], capraz_s
     // Ekler: ham gövde (yükleme) ve ham yanıt (indirme); JSON değil.
     if (yontem == "POST" && uc == "ek_yukle") || (yontem == "GET" && uc == "ek_indir") {
         return ek_ucu(&yontem, &q, body.to_vec(), hesap).await;
+    }
+    if (yontem == "POST" && uc == "belge_kaydet") || (yontem == "GET" && uc == "belge_indir") {
+        return belge_ucu(&yontem, &q, body.to_vec(), hesap).await;
     }
     let g: Value = if body.is_empty() {
         json!({})
@@ -339,6 +407,66 @@ async fn ek_ucu(yontem: &str, q: &HashMap<String, String>, body: Vec<u8>, hesap:
     }
 }
 
+fn b64_metin(q: &HashMap<String, String>, k: &str) -> String {
+    use base64::Engine as _;
+    q.get(k)
+        .and_then(|s| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s.trim().trim_end_matches('=')).ok())
+        .and_then(|b| String::from_utf8(b).ok())
+        .unwrap_or_default()
+}
+
+/// Belge kaydı (ham gövde) ve indirme (ham yanıt). Ad, not ve UYAP kart verisi Base64 ile gelir (Türkçe harfler).
+/// Kaydetme yanıtı JSON: `{id, surum, yeni}`; çakışmada 409 + `kod: "CAKISMA"`.
+async fn belge_ucu(yontem: &str, q: &HashMap<String, String>, body: Vec<u8>, hesap: String) -> Yanit {
+    let qi = |k: &str| q.get(k).and_then(|s| s.trim().parse::<i64>().ok());
+    let kaydet = yontem == "POST";
+    let kayit = bv::Kayit {
+        id: qi("id"),
+        surum: qi("surum").map(|n| n as i32),
+        ad: b64_metin(q, "ad64"),
+        bicim: q.get("bicim").cloned().unwrap_or_default(),
+        dosya_id: qi("dosya"),
+        uyap_karti: serde_json::from_str::<Value>(&b64_metin(q, "kart64")).ok().filter(|v| v.is_object()),
+        imzali: q.get("imzali").map(|s| s == "1" || s == "true").unwrap_or(false),
+        notu: b64_metin(q, "not64"),
+        gorev_id: qi("gorev"),
+    };
+    let (id, surum) = (qi("id"), qi("surum").map(|n| n as i32));
+    let sonuc = tokio::task::spawn_blocking(move || -> Result<Result<Value, (String, String, i32, bool, Vec<u8>)>, String> {
+        let mut c = crate::veritabani::baglanti()?;
+        let k = kisi_getir(&mut *c, &hesap)?;
+        if kaydet {
+            bv::kaydet(&mut *c, &k, &kayit, &body).map(Ok)
+        } else {
+            bv::oku(&mut *c, &k, id.ok_or("Kimlik eksik.")?, surum).map(Err)
+        }
+    })
+    .await;
+    match sonuc {
+        Ok(Ok(Ok(v))) => yanit(200, json!({"ok": true, "veri": v})),
+        Ok(Ok(Err((ad, bicim, surum, imzali, veri)))) => {
+            let mut h = HashMap::new();
+            h.insert("Content-Type".to_string(), "application/octet-stream".to_string());
+            h.insert("Cache-Control".to_string(), "no-store".to_string());
+            h.insert("X-Content-Type-Options".to_string(), "nosniff".to_string());
+            h.insert("X-Belge-Surum".to_string(), surum.to_string());
+            h.insert("X-Belge-Imzali".to_string(), if imzali { "1" } else { "0" }.to_string());
+            let tam_ad = format!("{ad}.{bicim}");
+            let kodlu: String = url::form_urlencoded::byte_serialize(tam_ad.as_bytes()).collect::<String>().replace('+', "%20");
+            h.insert("Content-Disposition".to_string(), format!("attachment; filename=\"belge.{bicim}\"; filename*=UTF-8''{kodlu}"));
+            (200, h, veri)
+        }
+        Ok(Err(e)) if e.starts_with("CAKISMA:") => {
+            yanit(409, json!({"ok": false, "kod": "CAKISMA", "error": e.trim_start_matches("CAKISMA:").trim()}))
+        }
+        Ok(Err(e)) => {
+            let sunucu = e.starts_with("veritabanı");
+            yanit(if sunucu { 500 } else { 400 }, json!({"ok": false, "error": e}))
+        }
+        Err(e) => yanit(500, json!({"ok": false, "error": format!("İşlem tamamlanamadı: {e}")})),
+    }
+}
+
 /// Büro üyelerini buluttaki İş Listesi hesaplarından (yalnız ad + rol) eşitler. Ofis programı paylaşımı
 /// başlatınca çağrılır; yönetici değilse yalnız kendi hesabı eklenir.
 pub async fn uyeleri_esitle() {
@@ -391,6 +519,10 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
         dagit(c, h, "POST", uc, &HashMap::new(), &g, bugun).map(|v| v.expect("uç"))
     };
     iv::kullanici_esitle(c, "mudur@api", "Müdür", true, true).unwrap();
+    // Görünen ad ofis adıysa kullanıcı adı yazılır
+    let zid = iv::kullanici_esitle(c, "zeynel@api", "API", true, true).unwrap();
+    let zad: String = c.query_one("SELECT ad FROM kullanici WHERE id = $1", &[&zid]).unwrap().get(0);
+    assert_eq!(zad, "zeynel");
     // Görülmemiş hesap üye olarak eklenir
     let ben = al(c, "katip@api", "ben", &[]).unwrap();
     assert_eq!((ben["ben"]["ad"].as_str(), ben["ben"]["yonetici"].as_bool()), (Some("katip"), Some(false)));

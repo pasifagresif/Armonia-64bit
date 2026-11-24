@@ -42,6 +42,10 @@ name = "msi_hazirla"
 path = "src/bin/msi_hazirla.rs"
 
 [[bin]]
+name = "guncelleme_arac"
+path = "src/bin/guncelleme_arac.rs"
+
+[[bin]]
 name = "turn_dogrula"
 path = "src/bin/turn_dogrula.rs"
 

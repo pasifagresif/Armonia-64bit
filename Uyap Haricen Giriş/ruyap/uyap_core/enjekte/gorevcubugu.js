@@ -86,10 +86,10 @@
             // çubuğun altından başladığı için orada boşluk yok, gizli.
             'body.cu-gorev #cu-menu-logo{position:absolute;left:0;right:0;top:0;height:var(--cu-nav-yuk,60px);display:flex;align-items:center;gap:10px;padding:0 18px;box-sizing:border-box;',
             'border-bottom:1px solid var(--cu-t-kenar,rgba(0,0,0,0.08));color:var(--cu-t-sol-yazi,#333);font:600 17px/1.05 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;user-select:none;pointer-events:none}',
-            'body.cu-gorev #cu-menu-logo .cu-ml-i{display:block;flex:none;width:34px;height:34px}',
-            'body.cu-gorev #cu-menu-logo .cu-ml-i img{display:block!important;width:34px;height:34px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.25)}',
-            'body.cu-gorev #cu-menu-logo b{display:block;font-size:17px;font-weight:600;letter-spacing:0.01em}',
-            'body.cu-gorev #cu-menu-logo small{display:block;margin-top:3px;font-size:10.5px;font-weight:500;letter-spacing:.08em;opacity:.75}',
+            'body.cu-gorev #cu-menu-logo .cu-ml-i{display:block;flex:none;width:28px;height:28px}',
+            'body.cu-gorev #cu-menu-logo .cu-ml-i img{display:block!important;width:28px;height:28px;border-radius:7px;box-shadow:0 1px 3px rgba(0,0,0,0.25)}',
+            'body.cu-gorev #cu-menu-logo b{display:block;font-size:15px;font-weight:600;letter-spacing:0.01em}',
+            'body.cu-gorev #cu-menu-logo small{display:block;margin-top:2px;font-size:9.5px;font-weight:500;letter-spacing:.08em;opacity:.75}',
             'html.cu-dar body.cu-gorev #cu-menu-logo{display:none}',
             '#uyap-gorev-cubugu .cu-gc-marka span.say{margin-left:2px;padding:0 7px;border-radius:999px;background:rgba(255,255,255,0.16);font-size:11px;font-weight:700;letter-spacing:0}',
             '#uyap-gorev-cubugu .cu-gc-marka .ok{margin-left:auto;font-size:10px;opacity:.85;letter-spacing:0;transition:transform .2s}',
@@ -170,13 +170,6 @@
     }
     katmanIzle();
 
-    // Üst çubuğun yüksekliği. Dar ekranda .u-navbar kabı 1 px, asıl çubuk içindeki <nav> (canlı ölçüm 2026-11-11):
-    // ikisinin büyüğü alınır.
-    function navYuk() {
-        let h = 0;
-        document.querySelectorAll('.u-navbar').forEach(function(e) { h = Math.max(h, e.offsetHeight); });
-        return h;
-    }
     function solMenu(ac) {
         solAcik = !!ac;
         // Dar ekranda açık kullanıcı şeridi (tarih, tema, kullanıcı) üst çubuğu uzatır; menü onun altından başlasın
@@ -186,9 +179,10 @@
             if (b) b.click();
         }
         const yan = document.getElementById('av-sidebar-wrapper');
-        const h = navYuk();
         if (yan) document.documentElement.style.setProperty('--cu-sol-gen', yan.offsetWidth + 'px');
-        if (h) document.documentElement.style.setProperty('--cu-nav-yuk', h + 'px');
+        // --cu-nav-yuk artık CSS'te (tema.css, mobil.css: yatık telefonda daha ince); eski sürümlerin satır içi
+        // ölçümü kalmışsa silinir, yoksa yön değişince eski yükseklik takılı kalır.
+        document.documentElement.style.removeProperty('--cu-nav-yuk');
         document.body.classList.toggle('cu-solacik', solAcik);
         ciz();
         // Sayfa genişliği değişti: UYAP'ın tabloları/ızgaraları yeni genişliğe uysun (dar ekranda menü itmez).
@@ -356,7 +350,7 @@
 
     // Birden çok kaynak girdi verir (kartlar.js: dosya kartları, icra.js: İcra Takip Süreçleri sayfası); her kaynak
     // kendi listesini bütünüyle yeniler. Çubukta sıra: önce sayfalar ('icra'), sonra dosya kartları.
-    const kaynaklar = {}, KAYNAK_SIRA = ['isler', 'icra', 'kart'];
+    const kaynaklar = {}, KAYNAK_SIRA = ['guncelleme', 'isler', 'icra', 'yazi', 'kart'];
     window.CU = {
         gorev: { ayarla: function(liste, kaynak) {
             kaynaklar[kaynak || 'kart'] = liste || [];

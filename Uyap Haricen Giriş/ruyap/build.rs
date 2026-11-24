@@ -25,13 +25,29 @@ fn main() {
     println!("cargo:rustc-env=UYAP_ORIGINAL_FILENAME=CokluUyap.exe");
     println!("cargo:rustc-env=UYAP_PRODUCT_NAME=Çoklu UYAP");
 
-    windows_kaynagi(&manifest_dir);
+    // Tek sürüm kaynağı (src/surum.rs): yayın derlemesinde CU_SURUM, yoksa Cargo.toml'daki sürüm.
+    println!("cargo:rerun-if-env-changed=CU_SURUM");
+    let surum = match env::var("CU_SURUM").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+        Some(s) => {
+            let gecerli = s.split('.').count() >= 3 && s.split('.').count() <= 4
+                && s.split('.').all(|p| !p.is_empty() && p.parse::<u16>().is_ok());
+            if !gecerli {
+                panic!("CU_SURUM geçersiz: {s:?} (beklenen: 26.11.23.2 gibi 3-4 sayı)");
+            }
+            println!("cargo:rustc-env=CU_SURUM_YAYIN=1");
+            s
+        }
+        None => env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into()),
+    };
+    println!("cargo:rustc-env=CU_SURUM={surum}");
+
+    windows_kaynagi(&manifest_dir, &surum);
 }
 
 /// Exe dosya simgesi + sürüm bilgisi (Windows Gezgini'nde Armonia simgesi). Yalnız windows-gnu hedefinde,
 /// MinGW `windres` ile; araç yoksa ya da hata verirse derleme durmaz, yalnız uyarı. Kaynaklar ASCII yollu
 /// OUT_DIR'e kopyalanır: Türkçe karakterli proje yolu GNU araçlarını bozuyor.
-fn windows_kaynagi(manifest_dir: &std::path::Path) {
+fn windows_kaynagi(manifest_dir: &std::path::Path, surum: &str) {
     let simge = manifest_dir.join("assets").join("armonia.ico");
     println!("cargo:rerun-if-changed={}", simge.display());
     let hedef = env::var("TARGET").unwrap_or_default();
@@ -43,7 +59,6 @@ fn windows_kaynagi(manifest_dir: &std::path::Path) {
         println!("cargo:warning=armonia.ico kopyalanamadı; exe simgesiz derlenecek");
         return;
     }
-    let surum = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
     let mut p: Vec<u16> = surum.split('.').filter_map(|x| x.parse().ok()).collect();
     p.resize(4, 0);
     let rc = format!(

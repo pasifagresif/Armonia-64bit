@@ -49,6 +49,8 @@ pub enum Sutun {
     Yeniden,
     Elektronik,
     Kesinlesme,
+    /// Avukatın dosyadaki rolü (Dosya Listesi ile aynı hesap): alacaklı / borçlu / 3. kişi vekili …
+    Rol,
     /// Tebligat grubu (bir bakışta sayım).
     Grup,
     /// Haciz ihbarnamesi sırası: "1" / "2" / "3", bilinmiyorsa "?", haciz ihbarnamesi değilse "".
@@ -56,12 +58,13 @@ pub enum Sutun {
 }
 
 impl Sutun {
-    pub const HEPSI: [Sutun; 17] = [
+    pub const HEPSI: [Sutun; 18] = [
         Sutun::Grup,
         Sutun::Haciz,
         Sutun::Birim,
         Sutun::DosyaNo,
         Sutun::DosyaTur,
+        Sutun::Rol,
         Sutun::Takip,
         Sutun::Alacakli,
         Sutun::Borclu,
@@ -80,6 +83,7 @@ impl Sutun {
             Sutun::Birim => "birim",
             Sutun::DosyaNo => "dosya_no",
             Sutun::DosyaTur => "dosya_tur",
+            Sutun::Rol => "rol",
             Sutun::Takip => "takip",
             Sutun::Alacakli => "alacakli",
             Sutun::Borclu => "borclu",
@@ -99,7 +103,7 @@ impl Sutun {
     fn kodlu(self) -> bool {
         matches!(
             self,
-            Sutun::DosyaTur | Sutun::Muhatap | Sutun::Mazbata | Sutun::Yeniden | Sutun::Elektronik | Sutun::Kesinlesme | Sutun::Grup | Sutun::Haciz
+            Sutun::DosyaTur | Sutun::Rol | Sutun::Muhatap | Sutun::Mazbata | Sutun::Yeniden | Sutun::Elektronik | Sutun::Kesinlesme | Sutun::Grup | Sutun::Haciz
         )
     }
     /// Seçenek listesi uzun olabilir (en çok `SECENEK_SINIRI`).
@@ -110,7 +114,9 @@ impl Sutun {
     fn etiket(self, deger: &str) -> String {
         match (self, deger) {
             (Sutun::Muhatap, d) => muhatap_etiketi(d).to_string(),
+            (Sutun::Rol, d) => crate::icra_dosyalar::rol_etiketi(d).to_string(),
             (Sutun::Mazbata, "var") => "Döndü".into(),
+            (Sutun::Mazbata, "etebligat") => "Gerekmez (e-tebligat)".into(),
             (Sutun::Mazbata, _) => "Dönmedi".into(),
             (Sutun::Yeniden, "evet") => "Talep edildi".into(),
             (Sutun::Yeniden, _) => "Talep yok".into(),
@@ -161,6 +167,8 @@ fn kesinlesme_etiketi(kod: &str) -> String {
 pub struct Filtre {
     /// Dosya no, daire, borçlu / muhatap, alacaklı, barkod içinde aranır.
     pub q: String,
+    /// Dosya listesi (`icra_listeler`): yalnız bu listedeki dosyaların tebligatları; None = hepsi.
+    pub liste: Option<i64>,
     /// "acik" | "kapali" | "" (hepsi)
     pub durum: String,
     pub acilis: (Option<NaiveDate>, Option<NaiveDate>),
@@ -191,6 +199,7 @@ impl Filtre {
             evrak: (gun("evrak_bas"), gun("evrak_son")),
             islem: (gun("islem_bas"), gun("islem_son")),
             sutun,
+            liste: crate::icra_listeler::liste_oku(q),
             sirala: q.get("sirala").cloned().unwrap_or_default(),
             azalan: q.get("yon").is_some_and(|y| y == "azalan"),
             sayfa: q.get("sayfa").and_then(|v| v.parse().ok()).unwrap_or(1),
@@ -240,6 +249,8 @@ pub struct Satir {
     yil: i32,
     sira_no: i32,
     pub dosya_tur: String,
+    /// Avukatın dosyadaki rolü ([crate::icra_dosyalar::benim_rolum] kodu; bilinmiyorsa "").
+    pub rol: &'static str,
     pub dosya_durumu: String,
     pub acik: bool,
     pub acilis: Option<NaiveDate>,
@@ -280,6 +291,7 @@ impl Satir {
             Sutun::Birim => bir(&self.birim),
             Sutun::DosyaNo => bir(&self.dosya_no),
             Sutun::DosyaTur => bir(&self.dosya_tur),
+            Sutun::Rol => bir(self.rol),
             Sutun::Takip => bir(&self.takip),
             Sutun::Alacakli => self.alacaklilar.clone(),
             Sutun::Borclu => bir(&self.borclu),
@@ -288,7 +300,8 @@ impl Satir {
             Sutun::Tur => bir(&self.tur),
             Sutun::Teblig => bir(&self.ptt_durumu),
             Sutun::Teslim => bir(&self.teslim_sekli),
-            Sutun::Mazbata => bir(if self.mazbata_var { "var" } else { "yok" }),
+            // E-tebligatta fiziki mazbata dönmez (UETS kaydı yeter): "Dönmedi" sayılmaz.
+            Sutun::Mazbata => bir(if self.mazbata_var { "var" } else if self.elektronik { "etebligat" } else { "yok" }),
             Sutun::Yeniden => evet(self.yeniden),
             Sutun::Elektronik => evet(self.elektronik),
             Sutun::Kesinlesme => bir(&self.kesinlesme_kod),
@@ -307,6 +320,7 @@ impl Satir {
     fn json(&self) -> Value {
         json!({
             "id": self.id, "dosya": self.dosya, "birim": self.birim, "dosya_no": self.dosya_no, "dosya_tur": self.dosya_tur,
+            "rol": self.rol, "rol_etiket": if self.rol.is_empty() { "" } else { crate::icra_dosyalar::rol_etiketi(self.rol) },
             "dosya_durumu": self.dosya_durumu, "acik": self.acik, "acilis_tarihi": self.acilis.map(|d| d.to_string()),
             "takip": self.takip, "alacakli": self.alacaklilar.join(", "), "borclu": self.borclu, "muhatap": self.muhatap,
             "muhatap_etiket": muhatap_etiketi(self.muhatap), "barkod": self.barkod, "tur": self.tur, "evrak_no": self.evrak_no,
@@ -337,7 +351,7 @@ impl Satir {
             self.ptt_durumu.clone(),
             self.son_islem_tarihi.clone(),
             self.teslim_sekli.clone(),
-            if self.mazbata_var { "Döndü".into() } else { "Dönmedi".into() },
+            if self.mazbata_var { "Döndü".into() } else if self.elektronik { "Gerekmez (e-tebligat)".into() } else { "Dönmedi".into() },
             if self.yeniden { "Talep edildi".into() } else { String::new() },
             if self.elektronik { "E-tebligat".into() } else { "Fiziki".into() },
             if self.kesinlesme.is_empty() { self.kesinlesme_neden.clone() } else { self.kesinlesme.clone() },
@@ -396,6 +410,7 @@ pub fn satirlari_oku<C: GenericClient>(c: &mut C) -> Result<Vec<Satir>, String> 
           WHERE d.yargi_turu = 2"
     );
     let tatiller = veri::resmi_tatiller(c)?;
+    let roller = crate::icra_dosyalar::avukat_rolleri(c)?;
     let bugun = chrono::Local::now().date_naive();
     let mut out = Vec::new();
     for s in c.query(&sql, &[]).map_err(hata)? {
@@ -472,6 +487,7 @@ pub fn satirlari_oku<C: GenericClient>(c: &mut C) -> Result<Vec<Satir>, String> 
             dosya_no: s.get(3),
             yil: s.get(4),
             sira_no: s.get(5),
+            rol: roller.get(&s.get::<_, i64>(1)).copied().unwrap_or(""),
             dosya_tur,
             dosya_durumu: s.get(8),
             acik: s.get::<_, i32>(9) == 0,
@@ -532,6 +548,7 @@ fn sirala_anahtari(s: &Satir, alan: &str) -> Option<Anahtar> {
         "birim" => metin(&s.birim),
         "dosya_no" => Some(Anahtar::Sayi(i64::from(s.yil), i64::from(s.sira_no))),
         "dosya_tur" => metin(&s.dosya_tur),
+        "rol" => (!s.rol.is_empty()).then(|| metin(crate::icra_dosyalar::rol_etiketi(s.rol))).flatten(),
         "durum" => metin(&s.dosya_durumu),
         "acilis" => s.acilis.map(Anahtar::Tarih),
         "takip" => metin(&s.takip),
@@ -544,7 +561,7 @@ fn sirala_anahtari(s: &Satir, alan: &str) -> Option<Anahtar> {
         "teblig" => metin(&s.ptt_durumu),
         "islem" => s.islem_gunu.map(Anahtar::Tarih),
         "teslim" => metin(&s.teslim_sekli),
-        "mazbata" => Some(Anahtar::Sayi(i64::from(s.mazbata_var), 0)),
+        "mazbata" => Some(Anahtar::Sayi(if s.mazbata_var { 2 } else { i64::from(s.elektronik) }, 0)),
         "yeniden" => Some(Anahtar::Sayi(i64::from(s.yeniden), 0)),
         "elektronik" => Some(Anahtar::Sayi(i64::from(s.elektronik), 0)),
         "kesinlesme" => metin(if s.kesinlesme.is_empty() { &s.kesinlesme_neden } else { &s.kesinlesme }),
@@ -582,7 +599,7 @@ fn sirala(satirlar: &mut Vec<Satir>, alan: &str, azalan: bool) {
 
 fn sirala_anahtari_gecerli(alan: &str) -> bool {
     [
-        "birim", "dosya_no", "dosya_tur", "durum", "acilis", "takip", "alacakli", "borclu", "muhatap", "barkod", "tur", "evrak", "teblig",
+        "birim", "dosya_no", "dosya_tur", "rol", "durum", "acilis", "takip", "alacakli", "borclu", "muhatap", "barkod", "tur", "evrak", "teblig",
         "islem", "teslim", "mazbata", "yeniden", "elektronik", "kesinlesme", "grup", "haciz",
     ]
     .contains(&alan)
@@ -631,7 +648,7 @@ fn suz(satirlar: Vec<Satir>, f: &Filtre) -> (Vec<Satir>, HashMap<&'static str, H
 }
 
 pub fn tebligat_listesi<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Value, String> {
-    let (satirlar, mut sayim) = suz(satirlari_oku(c)?, f);
+    let (satirlar, mut sayim) = suz(crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?, f);
     let toplam = satirlar.len();
     let dosya_sayisi = satirlar.iter().map(|s| s.dosya).collect::<HashSet<_>>().len();
     let boyut = f.boyut.clamp(1, 500);
@@ -649,14 +666,14 @@ pub fn tebligat_listesi<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Value
 
 /// Süzgeçteki tebligatların dosyaları (listedeki sırayla, tekil).
 pub fn tebligat_dosyalari<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Vec<i64>, String> {
-    let (satirlar, _) = suz(satirlari_oku(c)?, f);
+    let (satirlar, _) = suz(crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?, f);
     let mut gorulen = HashSet::new();
     Ok(satirlar.into_iter().map(|s| s.dosya).filter(|d| gorulen.insert(*d)).collect())
 }
 
 /// Süzülmüş, sıralı liste .xlsx olarak (her tebligat bir satır).
 pub fn tebligat_excel<C: GenericClient>(c: &mut C, f: &Filtre) -> Result<Vec<u8>, String> {
-    let (satirlar, _) = suz(satirlari_oku(c)?, f);
+    let (satirlar, _) = suz(crate::icra_listeler::suz(satirlari_oku(c)?, c, f.liste, |s| s.dosya)?, f);
     let satirlar: Vec<Vec<String>> = satirlar.iter().map(Satir::excel).collect();
     crate::gerekceli_karar::xlsx_bayt(&EXCEL_BASLIKLAR, &satirlar, &EXCEL_GENISLIK)
 }

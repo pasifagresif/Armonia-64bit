@@ -17,13 +17,14 @@
 //!   POST kural_varsayilan     hazır kuralı varsayılan değerlerine döndür (hazır kurallar silinmez)
 //!   GET  tatiller · POST tatil / tatil_sil
 //!   POST itiraz               {bag, edildi, tarih} — elle itiraz
-//!   POST kesinlesme_elle      {bag, durum} — "", konkordato, vefat, vasi
+//!   POST kesinlesme_elle      {bag, durum} — "", konkordato, vefat, vasi, tehiri_icra
 //!   POST islem_durumu         {dosya, durum, notu, bekleme_bitis}
 //!   POST hesapla              {dosya?} — kesinleşme / tebliğ / takip aşamasını yeniden hesapla
 
 use crate::icra_durum as durum;
 use crate::icra_tebligatlar as teb_liste;
 use crate::icra_dosyalar as dosya_liste;
+use crate::icra_kesinlestirme as kesin;
 use crate::icra_tebligat::{self as teb, tr_kucuk};
 use crate::icra_veri::{
     self as veri, durum_olayi_yaz, IslemDurumu, KesinlesmeDurumu, OlayKaynak, OlayTur, Rol, TakipAsamasi, YeniOlay,
@@ -129,6 +130,8 @@ pub struct Filtre {
     pub q: String,
     /// Takip aşaması kodu; boş = hepsi.
     pub asama: String,
+    /// Dosya listesi (`icra_listeler`): yalnız bu listedeki dosyalar; None = hepsi.
+    pub liste: Option<i64>,
     /// Dosyanın UYAP durumu: "acik" | "kapali" | "" (hepsi).
     pub durum: String,
     /// İcra dairesi. Düz metin: içinde geçen; `=` ile başlarsa tam eşleşme (listeden seçilen); `!` ile başlarsa
@@ -322,12 +325,16 @@ fn borclu_listesi_ic<C: GenericClient>(c: &mut C, f: &Filtre, kimlikler: Option<
            LEFT JOIN taraf t ON t.id = dt.taraf_id
           WHERE d.yargi_turu = 2 {durum_kosulu}
             AND ($1::text = '' OR dt.takip_asamasi = $1)
+            AND ($2::bigint IS NULL OR d.id IN (SELECT u.dosya_id FROM dosya_listesi_uyesi u WHERE u.liste_id = $2))
           ORDER BY dt.takip_asamasi_tarihi DESC NULLS LAST, d.yil DESC, d.sira_no DESC, dt.sira, dt.id",
         borclu = ad_sql("t"),
         alacakli = ad_sql("a"),
         mts = MTS_KAYNAKLI_SQL,
     );
-    let satir_kayitlari = c.query(&sql, &[&f.asama]).map_err(hata)?;
+    if let Some(l) = f.liste {
+        crate::icra_listeler::liste_dosyalari(c, l)?; // silinmiş liste: boş ekran değil, uyarı
+    }
+    let satir_kayitlari = c.query(&sql, &[&f.asama, &f.liste]).map_err(hata)?;
 
     // Borçluya bağlı tebligatlar (bankalara giden haciz ihbarnameleri gibi borçlusuz kayıtlar dosya panelinde kalır).
     let mut tebligatlar: HashMap<i64, Vec<ListeTebligati>> = HashMap::new();
@@ -660,9 +667,36 @@ pub fn dosya_ayrintisi<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Option
             "vekiller": s.get::<_, String>(17),
             "asama": asama, "asama_metni": durum::takip_asamasi_metni(&asama, asama_t),
             "kesinlesme_durumu": kes, "kesinlesme": durum::kesinlesme_metni(&kes, kes_t),
-            "tebligat": durum::tebligat_metni(&tebl, tebl_t, &tebl_s),
+            "tebligat": durum::tebligat_metni(&tebl, tebl_t, &tebl_s), "teblig_kodu": tebl,
             "itiraz": s.get::<_, bool>(15), "itiraz_tarihi": gun(s.get(16)), "kesinlesme_elle_tarihi": gun(s.get(18)),
         }));
+    }
+
+    // Borçluların Mernis kıyası ve son yeniden tebliğ talebi (sağ tık menüsü ve kart).
+    for s in c
+        .query(
+            "SELECT x.id, m.kategori, m.adres, m.teblig_adresi, m.aciklama, to_char(m.zaman, 'DD.MM.YYYY HH24:MI'),
+                    y.sonuc, to_char(y.zaman, 'DD.MM.YYYY HH24:MI'), y.mesaj, y.tur
+               FROM dosya_taraf x LEFT JOIN borclu_mernis m ON m.dosyataraf_id = x.id
+               LEFT JOIN LATERAL (SELECT sonuc, zaman, mesaj, tur FROM yeniden_teblig_talebi yt WHERE yt.dosyataraf_id = x.id
+                                   ORDER BY zaman DESC, id DESC LIMIT 1) y ON true
+              WHERE x.dosya_id = $1 AND x.rol = 'borclu' AND (m.dosyataraf_id IS NOT NULL OR y.sonuc IS NOT NULL)",
+            &[&dosya],
+        )
+        .map_err(hata)?
+    {
+        let bag: i64 = s.get(0);
+        let Some(t) = taraflar.iter_mut().find(|t| t["bag"] == bag) else { continue };
+        if let Some(k) = s.get::<_, Option<String>>(1) {
+            let tur = crate::icra_mernis::talep_turu(&k);
+            t["mernis"] = json!({"kategori": k, "etiket": crate::icra_mernis::kategori_etiketi(&k), "adres": s.get::<_, String>(2),
+                                 "teblig_adresi": s.get::<_, String>(3), "aciklama": s.get::<_, String>(4), "zaman": s.get::<_, String>(5),
+                                 "talep_turu": tur.map(|x| x.1), "tutar": tur.map(|x| x.2)});
+        }
+        if let Some(sonuc) = s.get::<_, Option<String>>(6) {
+            t["yeniden_talep"] = json!({"sonuc": sonuc, "zaman": s.get::<_, Option<String>>(7), "mesaj": s.get::<_, Option<String>>(8),
+                                        "tur": s.get::<_, Option<i16>>(9)});
+        }
     }
 
     let sql = format!(
@@ -707,7 +741,32 @@ pub fn dosya_ayrintisi<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Option
                    "aciklama": aciklama, "evrak_tarihi": s.get::<_, Option<String>>(3), "neden": s.get::<_, String>(4)})
         })
         .collect();
-    Ok(Some(json!({"kunye": kunye, "takip": takip, "taraflar": taraflar, "tebligatlar": tebligatlar, "alinamayan": alinamayan})))
+    // Elle bağlanabilen mazbata evrakları ve bağları (sağ tık menüsü).
+    let elle: HashMap<i32, i32> = crate::icra_kayit::elle_mazbata_baglari(c, dosya)?.into_iter().map(|(t, m)| (m, t)).collect();
+    let turler: Vec<String> = BAGLANABILIR_MAZBATALAR.iter().map(|t| t.to_string()).collect();
+    let mazbatalar: Vec<Value> = c
+        .query(
+            "SELECT e.birim_evrak_no, e.evrak_turu, e.aciklama, to_char(e.evrak_tarihi, 'DD/MM/YYYY'), to_char(mb.teblig_tarihi, 'DD/MM/YYYY')
+               FROM evrak e LEFT JOIN tebligat_mazbata_bagi mb ON mb.dosya_id = e.dosya_id AND mb.mazbata_evrak_no = e.birim_evrak_no
+              WHERE e.dosya_id = $1 AND e.evrak_turu = ANY($2) ORDER BY e.evrak_tarihi DESC NULLS LAST, e.birim_evrak_no DESC",
+            &[&dosya, &turler],
+        )
+        .map_err(hata)?
+        .iter()
+        .map(|s| {
+            let no: i32 = s.get(0);
+            json!({"evrak_no": no, "tur": s.get::<_, String>(1), "aciklama": s.get::<_, String>(2),
+                   "evrak_tarihi": s.get::<_, Option<String>>(3), "elle_tebligat": elle.get(&no),
+                   "teblig_tarihi": s.get::<_, Option<String>>(4)})
+        })
+        .collect();
+    let elle_tebligatlar: std::collections::HashSet<i32> = elle.values().copied().collect();
+    for t in tebligatlar.iter_mut() {
+        let no = t["evrak_no"].as_i64().unwrap_or(0) as i32;
+        t["mazbata_elle"] = json!(elle_tebligatlar.contains(&no));
+    }
+    Ok(Some(json!({"kunye": kunye, "takip": takip, "taraflar": taraflar, "tebligatlar": tebligatlar, "alinamayan": alinamayan,
+                   "mazbatalar": mazbatalar})))
 }
 
 /// Dosyanın durum geçmişi, yeniden eskiye.
@@ -1201,6 +1260,83 @@ pub fn e_mazbata_coz(satirlar: &[String]) -> EMazbata {
     m
 }
 
+/// Elle bağlanabilen (fiziki) mazbata evrak türleri.
+pub const BAGLANABILIR_MAZBATALAR: [&str; 3] = [teb::TEBLIG_MAZBATASI_TUR, teb::MTS_TEBLIG_MAZBATASI_TUR, teb::KAPALI_TEBLIG_MAZBATASI_TUR];
+
+/// Mazbatayı (evrak no) tebligata (evrak no) elle bağlar; ikisinin eski bağları düşer. `mazbata` None: tebligatın elle
+/// bağı kaldırılır (otomatik eşleşmeye döner). Sonra dosyanın mazbata eşleşmesi ve durumları yeniden kurulur.
+pub fn mazbata_bagla<C: GenericClient>(c: &mut C, dosya: i64, tebligat: i32, mazbata: Option<i32>, bugun: NaiveDate) -> Result<Value, String> {
+    mazbata_bagla_tarihli(c, dosya, tebligat, mazbata, None, bugun)
+}
+
+/// [`mazbata_bagla`] + mazbatadaki tebliğ tarihi (`teblig_tarihi`): PTT'de tebliğ günü olmayan (eski, silinmiş barkod)
+/// tebligatta kesinleşme bu günden hesaplanır. Bağ kaldırılırken yok sayılır.
+pub fn mazbata_bagla_tarihli<C: GenericClient>(
+    c: &mut C,
+    dosya: i64,
+    tebligat: i32,
+    mazbata: Option<i32>,
+    teblig_tarihi: Option<NaiveDate>,
+    bugun: NaiveDate,
+) -> Result<Value, String> {
+    if teblig_tarihi.is_some_and(|t| t > bugun) {
+        return Err("Tebliğ tarihi bugünden sonra olamaz.".into());
+    }
+    let fiziki: Option<bool> = c
+        .query_opt("SELECT elektronik_tebligat FROM tebligat_barkod WHERE dosya_id = $1 AND birim_evrak_no = $2", &[&dosya, &tebligat])
+        .map_err(hata)?
+        .map(|s| !s.get::<_, bool>(0));
+    match fiziki {
+        None => return Err("Tebligat bu dosyada bulunamadı.".into()),
+        Some(false) if mazbata.is_some() => return Err("E-tebligata fiziki mazbata bağlanmaz.".into()),
+        _ => {}
+    }
+    let mut tx = c.transaction().map_err(hata)?;
+    tx.execute("DELETE FROM tebligat_mazbata_bagi WHERE dosya_id = $1 AND tebligat_evrak_no = $2", &[&dosya, &tebligat]).map_err(hata)?;
+    if let Some(mz) = mazbata {
+        let turler: Vec<String> = BAGLANABILIR_MAZBATALAR.iter().map(|t| t.to_string()).collect();
+        let var = tx
+            .query_opt("SELECT 1 FROM evrak WHERE dosya_id = $1 AND birim_evrak_no = $2 AND evrak_turu = ANY($3)", &[&dosya, &mz, &turler])
+            .map_err(hata)?
+            .is_some();
+        if !var {
+            return Err("Mazbata evrakı bu dosyada bulunamadı.".into());
+        }
+        tx.execute("DELETE FROM tebligat_mazbata_bagi WHERE dosya_id = $1 AND mazbata_evrak_no = $2", &[&dosya, &mz]).map_err(hata)?;
+        tx.execute(
+            "INSERT INTO tebligat_mazbata_bagi (dosya_id, tebligat_evrak_no, mazbata_evrak_no, teblig_tarihi) VALUES ($1, $2, $3, $4)",
+            &[&dosya, &tebligat, &mz, &teblig_tarihi],
+        )
+        .map_err(hata)?;
+    }
+    tx.commit().map_err(hata)?;
+    let degisen = crate::icra_tarama::mazbatalari_yeniden_bagla(c, dosya, bugun)?;
+    Ok(json!({ "degisen": degisen }))
+}
+
+/// UYAP dosya penceresinde (evrak ağacı / belge görüntüleyici) mazbataya sağ tık: mazbata evrakını (UYAP'ın evrak
+/// nesnesi: birimEvrakNo, tur, aciklama, onaylandigiTarih) büro veritabanına yazar — yeni taranan mazbatayı tarama
+/// henüz görmemiş olabilir — ve bağlanabilecek PTT tebligatlarını döner. Bağın kendisi [`mazbata_bagla`] ile kurulur.
+pub fn mazbata_bag_secenekleri<C: GenericClient>(c: &mut C, dosya: i64, evrak: &Value) -> Result<Value, String> {
+    let tur = teb::metin(evrak, "tur");
+    if !BAGLANABILIR_MAZBATALAR.contains(&tur.as_str()) {
+        return Err(format!("\"{tur}\" tebligata elle bağlanan bir mazbata türü değil."));
+    }
+    let no = crate::icra_kayit::birim_evrak_no(evrak).ok_or("Mazbatanın evrak numarası okunamadı.")?;
+    // Yalnız yoksa eklenir: ağaçtaki evrak nesnesi açıklama taşımayabilir, taramanın yazdığı açıklama (barkod) ezilmez.
+    let tarih = evrak.get("onaylandigiTarih").and_then(crate::icra_veri::tarih::coz);
+    c.execute(
+        "INSERT INTO evrak (dosya_id, birim_evrak_no, evrak_turu, aciklama, evrak_tarihi) VALUES ($1, $2, $3, $4, $5::timestamp)
+         ON CONFLICT ON CONSTRAINT uq_dosya_evrak DO NOTHING",
+        &[&dosya, &no, &tur, &crate::icra_veri::kirp(&teb::metin(evrak, "aciklama"), 500), &tarih],
+    )
+    .map_err(hata)?;
+    let v = dosya_ayrintisi(c, dosya)?.ok_or("Dosya bulunamadı.")?;
+    let mazbata = v["mazbatalar"].as_array().and_then(|m| m.iter().find(|m| m["evrak_no"].as_i64() == Some(no as i64))).cloned();
+    let tebligatlar: Vec<Value> = v["tebligatlar"].as_array().map(|t| t.iter().filter(|t| t["elektronik"] != json!(true)).cloned().collect()).unwrap_or_default();
+    Ok(json!({"dosya": dosya, "mazbata": mazbata.ok_or("Mazbata evrakı kaydedilemedi.")?, "tebligatlar": tebligatlar}))
+}
+
 /// Mazbatayı dosyanın bir tebligatına işler (UYAP'a istek yok). Eşleşme: (1) barkod; (2) barkod tutmazsa ilk UETS olayı
 /// günü = tebligat evrak günü olan ve muhatabı hesap sahibiyle uyuşan TEK e-tebligat; (3) yoksa `secilen` (kullanıcı
 /// adaylardan seçer; tahmin yok). Döner: işlendiyse tebligat bilgisi, değilse aday listesi.
@@ -1301,12 +1437,12 @@ pub fn itiraz_ata<C: GenericClient>(c: &mut C, bag: i64, edildi: bool, tarih: Op
     durum::durumlari_guncelle(c, Some(dosya), bugun, &|_| {}).map(|_| ())
 }
 
-/// Elle girilen kesinleşme değeri: Konkordato, Vefat, Vasi (hesap bunları ezmez) ya da boş
+/// Elle girilen kesinleşme değeri: Konkordato, Vefat, Vasi, Tehir-i İcra (hesap bunları ezmez) ya da boş
 /// (yeniden hesaba bırak).
 pub fn kesinlesme_elle<C: GenericClient>(c: &mut C, bag: i64, yeni: &str, bugun: NaiveDate) -> Result<(), String> {
-    let izinli = [KesinlesmeDurumu::Konkordato.kod(), KesinlesmeDurumu::Vefat.kod(), KesinlesmeDurumu::Vasi.kod(), ""];
+    let izinli = [KesinlesmeDurumu::Konkordato.kod(), KesinlesmeDurumu::Vefat.kod(), KesinlesmeDurumu::Vasi.kod(), KesinlesmeDurumu::TehiriIcra.kod(), ""];
     if !izinli.contains(&yeni) {
-        return Err("Elle yalnız Konkordato, Vefat ya da Vasi girilebilir.".into());
+        return Err("Elle yalnız Konkordato, Vefat, Vasi ya da Tehir-i İcra girilebilir.".into());
     }
     let dosya = bagin_dosyasi(c, bag)?;
     let mut tx = c.transaction().map_err(hata)?;
@@ -1353,7 +1489,7 @@ pub fn kesinlesme_tarihi_elle<C: GenericClient>(c: &mut C, bag: i64, gun: Option
     let (eski, eski_t, eski_elle): (String, Option<NaiveDate>, Option<NaiveDate>) = (s.get(0), s.get(1), s.get(2));
     if eski_elle != gun {
         // Konkordato / vefat / vasi işaretini kaldır: kullanıcı artık gün giriyor.
-        let elle = [KesinlesmeDurumu::Konkordato.kod(), KesinlesmeDurumu::Vefat.kod(), KesinlesmeDurumu::Vasi.kod()];
+        let elle = [KesinlesmeDurumu::Konkordato.kod(), KesinlesmeDurumu::Vefat.kod(), KesinlesmeDurumu::Vasi.kod(), KesinlesmeDurumu::TehiriIcra.kod()];
         let (yeni, yeni_t) = match gun {
             Some(g) => (durum::elle_kesinlesme(g, bugun).to_string(), Some(g)),
             None => (if elle.contains(&eski.as_str()) { String::new() } else { eski.clone() }, eski_t),
@@ -1413,10 +1549,11 @@ fn sorgu_tam(q: &HashMap<String, String>, anahtar: &str) -> Result<i64, String> 
 }
 
 /// Liste süzgeçleri (sorgu dizesinden).
-fn filtre_oku(q: &HashMap<String, String>) -> Filtre {
+pub(crate) fn filtre_oku(q: &HashMap<String, String>) -> Filtre {
     Filtre {
         q: q.get("q").cloned().unwrap_or_default(),
         asama: q.get("asama").cloned().unwrap_or_default(),
+        liste: crate::icra_listeler::liste_oku(q),
         // `acik=1` eski istemciler için (yalnız açık); yeni istemci `durum` gönderir.
         durum: q.get("durum").cloned().unwrap_or_else(|| if q.get("acik").is_some_and(|v| v == "1") { "acik".into() } else { String::new() }),
         birim: q.get("birim").cloned().unwrap_or_default(),
@@ -1463,6 +1600,14 @@ fn dagit(c: &mut postgres::Client, yontem: &str, uc: &str, q: &HashMap<String, S
     let evet = |a: &str| g.get(a).and_then(Value::as_bool).unwrap_or(false);
     Ok(Some(match (yontem, uc) {
         ("GET", "ozet") => ozet(c)?,
+        ("GET", "listeler") => crate::icra_listeler::listeler(c)?,
+        ("POST", "liste") => json!({"id": crate::icra_listeler::liste_kaydet(c, teb::tam(g, "id"), &metin("ad"), &metin("aciklama"))?}),
+        ("POST", "liste_sil") => {
+            crate::icra_listeler::liste_sil(c, tam(g, "id")?)?;
+            Value::Null
+        }
+        ("POST", "liste_ekle") => crate::icra_listeler::liste_ekle(c, tam(g, "id")?, &dosya_listesi(g)?.ok_or("Dosya seçilmedi.")?)?,
+        ("POST", "liste_cikar") => crate::icra_listeler::liste_cikar(c, tam(g, "id")?, &dosya_listesi(g)?.ok_or("Dosya seçilmedi.")?)?,
         ("GET", "borclular") => borclu_listesi(c, &filtre_oku(q))?,
         ("GET", "dosya_kimlikleri") => json!(suzulen_dosyalar(c, &filtre_oku(q))?),
         ("GET", "dosya") => dosya_ayrintisi(c, sorgu_tam(q, "id")?)?.ok_or("Dosya bulunamadı.")?,
@@ -1478,6 +1623,14 @@ fn dagit(c: &mut postgres::Client, yontem: &str, uc: &str, q: &HashMap<String, S
         }
         ("GET", "dosyalar_istek") => {
             dosya_liste::istek_tahmini(c, &dosya_liste::Filtre::oku(q), q.get("mod").map(String::as_str).unwrap_or(""))?
+        }
+        ("GET", "kesinlestirme") => kesin::kesinlestirme_listesi(c, &kesin::Filtre::oku(q), bugun)?,
+        ("GET", "kesinlestirme_kimlikleri") => {
+            let (dosyalar, borclular) = kesin::kimlikler(c, &kesin::Filtre::oku(q), q.get("is").map(String::as_str).unwrap_or(""), bugun)?;
+            json!({"dosyalar": dosyalar, "borclular": borclular})
+        }
+        ("GET", "kesinlestirme_istek") => {
+            kesin::istek_tahmini(c, &kesin::Filtre::oku(q), q.get("is").map(String::as_str).unwrap_or(""), bugun)?
         }
         ("POST", "tur_eslestir") => {
             let liste: Vec<(String, String)> = g
@@ -1527,6 +1680,15 @@ fn dagit(c: &mut postgres::Client, yontem: &str, uc: &str, q: &HashMap<String, S
             let satirlar: Vec<String> = g.get("metin").and_then(Value::as_array).ok_or("Belge yazısı eksik.")?
                 .iter().take(2000).filter_map(|x| x.as_str().map(|x| x.chars().take(500).collect())).collect();
             e_mazbata_isle(c, dosya, &metin("belge"), &satirlar, teb::tam(g, "tebligat"), bugun)?
+        }
+        ("POST", "mazbata_bag_secenek") => {
+            let dosya = kunyeden_dosya(c, &metin("birim_id"), &metin("dosya_no"), g.get("dosya_tur_kod").and_then(Value::as_i64).unwrap_or(-1) as i32)?;
+            mazbata_bag_secenekleri(c, dosya, g.get("evrak").ok_or("Mazbata evrakı eksik.")?)?
+        }
+        ("POST", "mazbata_bagla") => {
+            let no = |a: &str| g.get(a).and_then(Value::as_i64).and_then(|n| i32::try_from(n).ok()).filter(|n| *n > 0);
+            mazbata_bagla_tarihli(c, tam(g, "dosya")?, no("tebligat").ok_or("Tebligat seçilmedi.")?, no("mazbata"),
+                                  gun_coz(g.get("teblig_tarihi").unwrap_or(&Value::Null))?, bugun)?
         }
         ("POST", "itiraz") => {
             itiraz_ata(c, tam(g, "bag")?, evet("edildi"), gun_coz(&g["tarih"])?, bugun)?;
@@ -1888,6 +2050,13 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     assert_eq!(al(c, "dosya", &[("id", &d1.to_string())])["taraflar"][1]["kesinlesme"], "Konkordato");
     gonder(c, "hesapla", json!({})).unwrap();
     assert_eq!(al(c, "dosya", &[("id", &d1.to_string())])["taraflar"][1]["kesinlesme"], "Konkordato", "hesap elle girileni ezmez");
+    // Tehir-i icra: elle girilir, hesap ezmez, takip aşaması "Durduruldu"
+    gonder(c, "kesinlesme_elle", json!({"bag": ahmet_bag, "durum": "tehiri_icra"})).unwrap();
+    gonder(c, "hesapla", json!({})).unwrap();
+    let a = al(c, "dosya", &[("id", &d1.to_string())])["taraflar"][1].clone();
+    assert_eq!(a["kesinlesme"], "Tehir-i İcra", "hesap elle girilen tehir-i icrayı ezmez");
+    assert!(a["asama_metni"].as_str().unwrap().starts_with("Durduruldu"), "{}", a["asama_metni"]);
+    gonder(c, "kesinlesme_elle", json!({"bag": ahmet_bag, "durum": "konkordato"})).unwrap();
     // Seçili dosyalar: yalnız onlar hesaplanır; süzgeçteki bütün dosya kimlikleri tek istekle
     assert_eq!(gonder(c, "hesapla", json!({"dosyalar": [d1]})).unwrap().unwrap()["dosya_sayisi"], 1);
     assert!(gonder(c, "hesapla", json!({"dosyalar": ["x"]})).is_err());

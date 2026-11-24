@@ -334,6 +334,33 @@ fn header_ci<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a
         .map(|(_, v)| v.as_str())
 }
 
+/// Tünelden gelen "UDF İndir" isteği: alan değerleri yerleştirilmiş kopya (uyap_proxy `udf_doldur_cevir` ile aynı).
+async fn udf_doldur_tunel(govde: Vec<u8>) -> (u16, HashMap<String, String>, Vec<u8>) {
+    let metin = |kod: u16, m: &str| {
+        let h = HashMap::from([("content-type".to_string(), "text/plain; charset=utf-8".to_string())]);
+        (kod, h, m.as_bytes().to_vec())
+    };
+    if govde.len() > 40 * 1024 * 1024 {
+        return metin(413, "Belge çok büyük.");
+    }
+    if !crate::udf_pdf::udf_zip_mi(&govde) {
+        return metin(415, "UDF değil.");
+    }
+    match tokio::task::spawn_blocking(move || crate::udf_alan::doldur(&govde)).await {
+        Ok(Ok(Some(udf))) => (
+            200,
+            HashMap::from([
+                ("content-type".to_string(), "application/octet-stream".to_string()),
+                ("cache-control".to_string(), "no-store".to_string()),
+            ]),
+            udf,
+        ),
+        Ok(Ok(None)) => (204, HashMap::new(), Vec::new()),
+        Ok(Err(e)) => metin(422, &e),
+        Err(_) => metin(500, "İşlem yarıda kaldı."),
+    }
+}
+
 /// Tünelden gelen UDF → PDF isteği (ofis vekilindeki `/__uyap_yerel__/udf_pdf` ile aynı iş).
 async fn udf_pdf_tunel(govde: Vec<u8>) -> (u16, HashMap<String, String>, Vec<u8>) {
     let metin = |kod: u16, m: &str| {
@@ -400,6 +427,10 @@ pub async fn handle_uyap_request(
     // Büro veritabanı uçları (İcra Takip Süreçleri sayfası): ofis bilgisayarındaki veritabanından cevaplanır,
     // UYAP'a iletilmez. Bütün büro kullanıcılarına açık; başka siteden gelen yazma isteği reddedilir.
     // İş Listesi (büro veritabanı): isteğin sahibi tünel biletinden (kimlik.rs). icra_api'den ÖNCE: aynı ön ek.
+    // Armonia Yazı editörünün dosyaları (src/yazi_sunucu.rs): uzaktaki kullanıcı da aynı editörü açar.
+    if crate::yazi_sunucu::is_path(&path) {
+        return crate::yazi_sunucu::yanit(&method, &path);
+    }
     if crate::is_api::is_path(&path) {
         let capraz = header_ci(&req_headers, "sec-fetch-site").is_some_and(|v| v.eq_ignore_ascii_case("cross-site"));
         return crate::is_api::handle(&method, &path, &query, body, capraz, hesap.as_deref()).await;
@@ -417,9 +448,13 @@ pub async fn handle_uyap_request(
         return jobs::handle_control(&method, &path, &query, &body, Some(kaynak)).await;
     }
 
+    // DİKKAT: `path` baştaki "/" atılmış hâlde (yukarıda trim_start_matches).
     // Uzak cihazdaki "Paylaş": UDF'yi PDF'e çevir (telefonun paylaş ekranı UDF almıyor). Yalnız çeviri; UYAP'a gitmez.
-    if path == "/__uyap_yerel__/udf_pdf" && method.eq_ignore_ascii_case("POST") {
+    if path == "__uyap_yerel__/udf_pdf" && method.eq_ignore_ascii_case("POST") {
         return udf_pdf_tunel(body.to_vec()).await;
+    }
+    if path == "__uyap_yerel__/udf_doldur" && method.eq_ignore_ascii_case("POST") {
+        return udf_doldur_tunel(body.to_vec()).await;
     }
 
     if let Some(kesik) = uyap_proxy::kesilen_uc_yaniti(&path) {

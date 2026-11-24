@@ -395,7 +395,7 @@
         'html[data-theme="dark"] .dosya-sorgula-popup table.table-striped > tbody > tr:nth-of-type(odd) > *{background-color:rgba(255,255,255,0.05)!important}';
     (document.head || document.documentElement).appendChild(st);
 
-    // ── Sol menü açıkken kart menünün sağındaki alana yerleşir (kullanıcı bulgusu 2026-11-11: yarım menü
+    // ── Sol menü açıkken kart menünün sağındaki alana yerleşir (Armonia Yazı yan yana açıkken de onun solundaki alana) (kullanıcı bulgusu 2026-11-11: yarım menü
     // kadar kaydırmak geniş kartta yetmiyordu). DevExtreme kartı pencereye göre ortalayıp transform ile
     // konumluyor; ona dokunmadan bağımsız CSS 'translate' ile sağa kaydırılır, genişlik kalan alana sığdırılır.
     // Normal: kartın solu menünün en az 12 px sağında, kalan alanda ortalı. Tam ekran: menünün bittiği yerden
@@ -407,14 +407,17 @@
         const yan = document.getElementById('av-sidebar-wrapper');
         // Dar ekranda (mobil.js) menü sayfayı itmez, kartın üstüne açılır: kart yerinde kalır.
         const acik = document.body.classList.contains('cu-solacik') && yan && !(window.__cuDar && window.__cuDar());
-        if (!acik) {
+        // Armonia Yazı sağda yan yana açıksa (enjekte/yazi.js) kart soldaki alana sığar: belge okunurken yanda
+        // yazılır (kullanıcı bulgusu 23.11.2026: kart editörün altında kalıyordu).
+        const sagPay = window.__cuYaziSagPay ? window.__cuYaziSagPay() : 0;
+        if (!acik && !sagPay) {
             if (c.style.translate || c.style.maxWidth) { c.style.translate = ''; c.style.maxWidth = ''; }
             oncekiTaban = null;
             return;
         }
         const tam = c.classList.contains('dx-popup-fullscreen');
-        const sol = yan.offsetWidth;
-        const alanGen = document.documentElement.clientWidth - sol;
+        const sol = acik ? yan.offsetWidth : 0;
+        const alanGen = document.documentElement.clientWidth - sol - sagPay;
         const mg = (tam ? alanGen : alanGen - 24) + 'px';
         if (c.style.maxWidth !== mg) c.style.maxWidth = mg;
         const r = c.getBoundingClientRect();
