@@ -1,0 +1,73 @@
+# Armonia Yazı (belge editörü, Tauri + WebKitGTK) masaüstü oturumunda, AYRI kum havuzunda. Claude, 2026-11-24.
+# Belge açma/kaydetme dışında hiçbir şeye ihtiyacı yok: AĞ YOK (PrivateNetwork), ev dizininde yalnız Belgeler ve
+# İndirilenler (belge açıp kaydetmek için yazılabilir; Çoklu UYAP evrakı Belgeler/UYAP dahil) ile kendi veri klasörü. Kartla imza için yalnız imza
+# hizmetinin soketi (/run/armonia-imza/imza.sock); karta, 5975'e, oturum ve sistem D-Bus'ına, systemd --user'a, USB
+# disklere, klavye aygıtlarına erişim yok. Arayüz dosya sistemine doğrudan erişemez (Tauri izinleri: core:default);
+# dosyayı kabuk okur/yazar ve yalnız kullanıcının pencereden seçtiği / çift tıkla açtığı dosyaya doğrudan yazar.
+# BİLİNEN EKSİK (denetçi 24.11 O1): WebKitGTK 4.1'de web içeriğinin kendi bubblewrap kum havuzu varsayılan olarak
+# KAPALI ve Tauri/wry açmıyor. Web içeriği süreci yalnız bu birimin kum havuzunda çalışır. Açılması (WebContext
+# sandbox + /proc bağlama uyumu) Linux'ta denenecek; o zamana kadar birim ad alanı/mount izni vermez.
+[Unit]
+Description=Armonia Yazı
+CollectMode=inactive-or-failed
+
+[Service]
+Type=simple
+User=armonia
+Group=armonia
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+# Veri klasörü kullanıcı kimliğiyle açılır ('+': kum havuzu dışında; BindPaths'ten önce var olmalı)
+ExecStartPre=+/usr/sbin/runuser -u armonia -- /usr/bin/mkdir -p -m 0700 /home/armonia/.local/share/armonia-yazi
+ExecStart=/opt/armonia/bin/yazi_calistir.sh
+KillMode=control-group
+TimeoutStopSec=5
+WorkingDirectory=-/home/armonia/.local/share/armonia-yazi
+Environment=LANG=tr_TR.UTF-8
+Environment=XKB_DEFAULT_LAYOUT=tr
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+# '-' YOK: dizin yoksa birim başlamasın (kaydedilen belge sessizce tmpfs'e gidip kaybolmasın)
+BindPaths=/home/armonia/.local/share/armonia-yazi /home/armonia/Belgeler /home/armonia/İndirilenler
+# /run/user boş tmpfs; içine yalnız Wayland soketi (kanca: 20-calisma.conf, UID ile). bus/systemd --user YOK.
+TemporaryFileSystem=/run/user:mode=0755
+PrivateTmp=yes
+InaccessiblePaths=-/root -/srv -/var/lib/armonia -/var/lib/armonia-imza -/run/postgresql -/run/armonia -/dev/input
+InaccessiblePaths=-/run/pcscd -/run/armonia-tarayici.sock -/run/armonia-yazi.sock
+InaccessiblePaths=-/run/systemd/resolve
+# Sistem D-Bus'ı (logind, NetworkManager, udisks) ve takılı diskler görünmez (denetçi 24.11 O4)
+InaccessiblePaths=-/run/dbus -/media -/mnt -/run/media
+# Oturumla ortak paylaşımlı bellek ve System V IPC yok (D6)
+TemporaryFileSystem=/dev/shm:mode=1777
+PrivateIPC=yes
+DevicePolicy=closed
+DeviceAllow=char-drm rw
+# Ağ yok: yalnız kendi geri döngü arayüzü. Unix soketleri (Wayland, imza hizmeti) dosya yoluyla çalışır.
+PrivateNetwork=yes
+IPAddressDeny=any
+LimitCORE=0
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+KeyringMode=private
+UMask=0077
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# WebKit kum havuzu kapalı (yukarıdaki BİLİNEN EKSİK): ad alanı ve mount izni gerekmez (denetçi 24.11 O1 (a))
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+# JavaScriptCore JIT -> MemoryDenyWriteExecute KAPALI. DOĞRULANMADI: @system-service WebKitGTK'ya yetiyor mu
+# (Linux'ta ilk denemede günlükte "Operation not permitted" aranacak).
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @obsolete @swap @reboot @module @raw-io @cpu-emulation @debug @clock
+SystemCallErrorNumber=EPERM

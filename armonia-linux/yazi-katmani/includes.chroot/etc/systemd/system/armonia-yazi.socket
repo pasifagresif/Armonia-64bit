@@ -1,0 +1,20 @@
+# Armonia Yazı açma isteği (yazi_ac.sh: tek satır; boş = yeni belge, yoksa belgenin tam yolu). Her bağlantı için
+# kum havuzlu bir armonia-yazi@.service örneği (bir pencere) başlar. Yalnız 'armonia' grubu yazabilir. Claude, 2026-11-24.
+[Unit]
+Description=Armonia Yazı istek soketi
+
+[Socket]
+ListenStream=/run/armonia-yazi.sock
+# Sahibi root: kullanıcı soketin iznini değiştiremez (denetçi 24.11 D5)
+SocketUser=root
+SocketGroup=armonia
+SocketMode=0660
+Accept=yes
+# Aynı anda en çok 8 pencere; ard arda tıklamada servis fırtınası olmasın
+MaxConnections=8
+MaxConnectionsPerSource=8
+TriggerLimitIntervalSec=10s
+TriggerLimitBurst=20
+
+[Install]
+WantedBy=sockets.target

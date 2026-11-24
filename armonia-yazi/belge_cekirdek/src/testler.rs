@@ -43,6 +43,11 @@ fn zip_yap(dosyalar: &[(&str, &[u8])]) -> Vec<u8> {
     z.finish().unwrap().into_inner()
 }
 
+/// Örnek belge, okunmuş hâliyle (stil testleri de kullanır).
+pub(crate) fn ornek_belge() -> Belge {
+    udf::oku(&ornek_udf()).unwrap().belge
+}
+
 fn ornek_udf() -> Vec<u8> {
     zip_yap(&[("content.xml", ORNEK.as_bytes()), ("documentproperties.xml", b"<properties/>")])
 }
@@ -110,11 +115,75 @@ fn gidis_donus_kayipsiz() {
 fn yazilan_konumlar_sirali_ve_utf16() {
     let o = udf::oku(&ornek_udf()).unwrap();
     let xml = udf::icerik_yaz(&o.belge);
-    // Üst bilgi önce yazılır: 0..9; emoji içeren parça 15 birim
-    assert!(xml.contains(r#"<content startOffset="0" length="9" size="10" />"#));
-    assert!(xml.contains(r#"<content startOffset="24" length="15" italic="true""#));
+    // UYAP sırası: üst bilgi (0..10) → gövde → alt bilgi en sonda; konum özellikleri öğenin sonunda
+    assert!(xml.contains(r#"<content size="10" startOffset="0" length="9" />"#));
+    // emoji içeren parça 15 UTF-16 birimi; alt bilgi artık arada olmadığı için 22'de başlar
+    assert!(xml.contains(r#"sonu" startOffset="22" length="15" />"#));
     assert!(xml.contains("Ali ]]]]><![CDATA[> Veli"));
     assert!(xml.contains("&#10;sonu"));
+    let govde_sonu = xml.rfind("</paragraph><footer").expect("alt bilgi gövdeden sonra");
+    assert!(xml[govde_sonu..].contains(r#"fieldName="pageNumber" startOffset="52" length="1" />"#));
+    // UYAP biçimi: bildirim satırı, boşluklu açılış etiketleri, metnin sonunda göstergesiz "\n"
+    assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\" ?> \n\n<template format_id=\"1.8\" >\n"));
+    assert!(xml.contains("<elements resolver=\"hvl-default\" >\n<header"));
+    assert!(xml.contains("\n\n]]></content>"));
+}
+
+#[test]
+fn resim_verisi_satirlara_bolunur() {
+    let mut b = ornek_belge();
+    if let Blok::Paragraf(p) = &mut b.govde[4] {
+        if let Parca::Resim { oz, .. } = &mut p.parcalar[0] {
+            // XML okuyucusu ham satır sonunu boşluğa çevirmiş hâli
+            oz.ayarla("imageData", "AAAA BBBB\"<x>");
+        }
+    }
+    let xml = udf::icerik_yaz(&b);
+    assert!(xml.contains("imageData=\"AAAA\nBBBBx\""), "base64 dışı karakterler atılır, boşluk satır sonu olur");
+    let o = udf::icerik_oku(&xml).unwrap();
+    assert!(o.uyarilar.is_empty());
+}
+
+/// Gerçek UDF'ler (kişisel veri: depoya girmez). Klasör ARMONIA_YAZI_ORNEKLER ile verilir:
+///   ARMONIA_YAZI_ORNEKLER=/yol cargo test -- --ignored gercek
+/// Her dosya uyarısız okunmalı ve yeniden yazılan content.xml UYAP'ınkiyle bayt bayt aynı olmalı.
+#[test]
+#[ignore]
+fn gercek_ornekler_bayt_bayt() {
+    use std::io::Read;
+    let Ok(klasor) = std::env::var("ARMONIA_YAZI_ORNEKLER") else {
+        panic!("ARMONIA_YAZI_ORNEKLER verilmedi");
+    };
+    let mut sayi = 0;
+    let mut hatalar = Vec::new();
+    for g in std::fs::read_dir(&klasor).unwrap().flatten() {
+        let yol = g.path();
+        if yol.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("udf")) != Some(true) {
+            continue;
+        }
+        sayi += 1;
+        let ad = yol.file_name().unwrap().to_string_lossy().to_string();
+        let bayt = std::fs::read(&yol).unwrap();
+        let o = match udf::oku(&bayt) {
+            Ok(o) => o,
+            Err(e) => {
+                hatalar.push(format!("{ad}: okunamadı: {e}"));
+                continue;
+            }
+        };
+        if !o.uyarilar.is_empty() {
+            hatalar.push(format!("{ad}: uyarılar {:?}", o.uyarilar));
+        }
+        let mut asil = String::new();
+        zip::ZipArchive::new(Cursor::new(&bayt)).unwrap().by_name("content.xml").unwrap().read_to_string(&mut asil).unwrap();
+        let yeni = udf::icerik_yaz(&o.belge);
+        if yeni != asil {
+            let i = yeni.bytes().zip(asil.bytes()).position(|(a, b)| a != b).unwrap_or(yeni.len().min(asil.len()));
+            hatalar.push(format!("{ad}: content.xml farklı (ilk fark bayt {i}, uzunluk {} / {})", yeni.len(), asil.len()));
+        }
+    }
+    assert!(sayi > 0, "klasörde .udf yok");
+    assert!(hatalar.is_empty(), "{sayi} dosyadan sorunlu olanlar:\n{}", hatalar.join("\n"));
 }
 
 #[test]

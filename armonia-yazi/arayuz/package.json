@@ -1,0 +1,27 @@
+{
+  "name": "armonia-yazi-arayuz",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Armonia Yazı editör arayüzü (Armonia'da Tauri, cokluuyap.com'da web). Claude, 2026-11-23.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "denetle": "tsc --noEmit",
+    "test:donusum": "vite build --ssr test/gidis_donus.ts --outDir test-cikti --emptyOutDir && node test-cikti/gidis_donus.js"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.5",
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-history": "^1.5.2",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.13",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.12.7",
+    "prosemirror-view": "^1.43.1"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

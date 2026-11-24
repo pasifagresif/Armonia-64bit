@@ -7,6 +7,7 @@
 
 /// Bir öğenin özellikleri: (ad, ham değer), dosyadaki sırayla. Konum özellikleri (`startOffset`, `length`) hariç.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Ozellikler(pub Vec<(String, String)>);
 
 impl Ozellikler {
@@ -38,6 +39,7 @@ impl Ozellikler {
 
 /// Paragraf içindeki parça. UDF etiketleri: `content`, `space`, `tab`, `field`, `image`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Parca {
     /// Metin (`content`). Satır sonu karakterleri dahil, dosyadaki gibi.
     Metin { metin: String, oz: Ozellikler },
@@ -84,6 +86,7 @@ impl Parca {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Paragraf {
     pub oz: Ozellikler,
     pub parcalar: Vec<Parca>,
@@ -97,24 +100,28 @@ impl Paragraf {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Hucre {
     pub oz: Ozellikler,
     pub bloklar: Vec<Blok>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Satir {
     pub oz: Ozellikler,
     pub hucreler: Vec<Hucre>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Tablo {
     pub oz: Ozellikler,
     pub satirlar: Vec<Satir>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Blok {
     Paragraf(Paragraf),
     Tablo(Tablo),
@@ -122,6 +129,7 @@ pub enum Blok {
 
 /// Üst ya da alt bilgi (`header` / `footer`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Kenar {
     pub oz: Ozellikler,
     pub bloklar: Vec<Blok>,
@@ -129,12 +137,14 @@ pub struct Kenar {
 
 /// Adlandırılmış stil (`styles/style`). `resolver` özelliği üst stile işaret eder (zincir).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Stil {
     pub ad: String,
     pub oz: Ozellikler,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Belge {
     /// `template` kök öğesinin özellikleri (ör. `format_id`).
     pub kok: Ozellikler,
@@ -148,6 +158,10 @@ pub struct Belge {
     pub stiller: Vec<Stil>,
     /// UDF ZIP'indeki content.xml dışındaki dosyalar (ad, bayt), sırayla. İmza (`sign.sgn`) okunurken ayrılır.
     pub ek_dosyalar: Vec<(String, Vec<u8>)>,
+    /// `template` altındaki tanınmayan, metin konumu taşımayan öğeler (ör. UYAP web'in `<webID>`'si), ham XML
+    /// olarak; yazarken stillerden sonra aynen geri konur.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ek_ogeler: Vec<String>,
 }
 
 impl Belge {

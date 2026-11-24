@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- UYAP belge biçimi (UDF): ZIP içinde content.xml. Armonia Yazı ile açılır. Claude, 2026-11-24. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-uyap-udf">
+    <comment>UYAP belgesi</comment>
+    <comment xml:lang="tr">UYAP belgesi</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.udf" weight="80"/>
+    <generic-icon name="x-office-document"/>
+  </mime-type>
+</mime-info>

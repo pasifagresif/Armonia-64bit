@@ -1,0 +1,66 @@
+# Armonia imza hizmeti (armonia-imza, armonia-yazi/imza). Claude, 2026-11-23 / 2026-11-24.
+# UDF'i Adalet E-imza istemcisine (127.0.0.1:5975) imzalatır, dönen imzayı ve belgenin değişmediğini doğrular, her
+# isteği (başarılı/başarısız) zincirli günlüğe yazar: /var/lib/armonia-imza/gunluk.jsonl. Günlük yazılamazsa imzalı
+# belge verilmez; günlük zinciri bozuksa hizmet başlamaz. PIN istekle gelir, saklanmaz, günlüğe yazılmaz.
+# Günlüğün gücü (denetçi 24.11 O3): zincir root OLMAYAN bir sürecin kaydı değiştirmesini/silmesini gösterir; root ya
+# da hizmetin kendisi özetleri yeniden hesaplayıp zinciri baştan yazabilir (anahtar yok), sondan kesme de
+# yakalanmaz. Canlı sistemde (toram) /var/lib RAM'dedir: günlük bilgisayar kapanınca silinir; kalıcılık kasa (G2) ile.
+# Karta doğrudan erişmez (pcscd yok). Masaüstü oturumunun 5975'e doğrudan erişimi kapalı (nftables oturum_yerel):
+# oturumdan imza yalnız bu hizmet (günlüklü) ya da tarayıcı/Çoklu UYAP dilimi (UYAP portalı) üzerinden.
+# Günlüğü denetleme: sudo -u armonia-imza /opt/armonia/yazi/armonia-imza gunluk-dogrula /var/lib/armonia-imza/gunluk.jsonl
+[Unit]
+Description=Armonia imza hizmeti
+Requires=armonia-imza.socket
+After=armonia-imza.socket armonia-eimza.service
+
+[Service]
+Type=simple
+ExecStart=/opt/armonia/yazi/armonia-imza
+User=armonia-imza
+Group=armonia-imza
+StateDirectory=armonia-imza
+StateDirectoryMode=0700
+Environment=ARMONIA_IMZA_GUNLUK=/var/lib/armonia-imza/gunluk.jsonl
+Environment=ARMONIA_IMZA_ARKA=adalet
+Environment=LANG=C.UTF-8
+# PIN hiçbir koşulda günlüğe düşmesin (hizmet zaten yazmaz; ek önlem)
+LogFilterPatterns=~(?i)pin
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateIPC=yes
+# Yalnız yerel e-imza istemcisi (localhost:5975) ve kendi Unix soketi (systemd'den gelir)
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressAllow=localhost
+IPAddressDeny=any
+InaccessiblePaths=-/run/pcscd -/srv -/var/lib/armonia -/var/lib/armonia-eimza -/run/postgresql -/run/armonia -/run/user
+InaccessiblePaths=-/run/armonia-tarayici.sock -/run/armonia-yazi.sock -/run/dbus
+# Uzun istekler/çok büyük belgeler belleği tüketmesin
+MemoryMax=512M
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# ProtectProc=invisible DEĞİL: çağıranın systemd birimi /proc/<pid>/cgroup'tan okunup günlüğe yazılır (denetçi
+# 24.11 O5). ProcSubset=pid ile /proc'ta süreç dışı dosyalar yine görünmez.
+ProcSubset=pid
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+KeyringMode=private
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+UMask=0077
+LimitCORE=0

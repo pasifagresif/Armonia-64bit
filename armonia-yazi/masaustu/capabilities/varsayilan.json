@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "varsayilan",
+  "description": "Ana pencere: yalnız çekirdek izinleri. Dosya pencereleri ve imza Rust komutlarıyla (main.rs); arayüze dosya sistemi, kabuk ya da ağ izni verilmez.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

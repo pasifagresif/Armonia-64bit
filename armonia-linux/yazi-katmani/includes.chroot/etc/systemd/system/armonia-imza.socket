@@ -1,0 +1,18 @@
+# Armonia imza hizmeti soketi. Claude, 2026-11-23 / 2026-11-24.
+# Bağlanabilen: masaüstü kullanıcısı (armonia) ve onun Armonia Yazı kum havuzu. Tarayıcı ve Çoklu UYAP birimlerinde
+# bu soketin dizini görünmez (InaccessiblePaths, kanca 0220). Her istek PIN ister ve imza günlüğüne yazılır.
+[Unit]
+Description=Armonia imza hizmeti soketi
+
+[Socket]
+# Soket kendi dizininde: tarayıcı/Çoklu UYAP birimleri DİZİNİ gizler; soket yeniden oluşturulsa da gizli kalır
+# (denetçi 24.11 D1)
+ListenStream=/run/armonia-imza/imza.sock
+DirectoryMode=0755
+SocketUser=root
+SocketGroup=armonia
+SocketMode=0660
+Accept=no
+
+[Install]
+WantedBy=sockets.target

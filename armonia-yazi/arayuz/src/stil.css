@@ -1,0 +1,111 @@
+/* Armonia Yazı. Arayüz renkleri Armonia temasıyla uyumlu (adaçayı); belge sayfası her zaman beyaz kâğıt.
+   Claude, 2026-11-23. */
+:root {
+  --zemin: #f3eee6;
+  --cubuk: #fcfaf6;
+  --kenar: #e2dacb;
+  --yazi: #2f2f2f;
+  --vurgu: #7c9a7e;
+  --vurgu-koyu: #5f7a61;
+  --vurgu-zemin: #e6ebe3;
+  --uyari: #a0522d;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --zemin: #1d2130; --cubuk: #2a2f40; --kenar: #3a4055; --yazi: #dedede; --vurgu-zemin: #2c3554; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--zemin); color: var(--yazi);
+  font-family: "DejaVu Sans", "Segoe UI", sans-serif; font-size: 14px; }
+body { display: flex; flex-direction: column; }
+
+#arac-cubugu { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 10px;
+  background: var(--cubuk); border-bottom: 1px solid var(--kenar); position: sticky; top: 0; z-index: 2; }
+#arac-cubugu button { min-width: 34px; height: 32px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--yazi); font: inherit; cursor: pointer; }
+#arac-cubugu button:hover:not(:disabled) { background: var(--vurgu-zemin); }
+#arac-cubugu button.etkin { background: var(--vurgu-zemin); border-color: var(--vurgu); }
+#arac-cubugu button:disabled { opacity: .4; cursor: default; }
+#arac-cubugu .isaret-kalin { font-weight: bold; }
+#arac-cubugu .isaret-egik { font-style: italic; }
+#arac-cubugu .isaret-alti { text-decoration: underline; }
+#arac-cubugu .ayrac { width: 1px; height: 22px; background: var(--kenar); margin: 0 4px; }
+#durum { margin-left: auto; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+
+#bildirim { padding: 8px 14px; border-bottom: 1px solid var(--kenar); background: var(--vurgu-zemin); }
+#bildirim.uyari { background: #fbefe2; color: #6b3a1c; }
+#bildirim.hata { background: #f7dcd3; color: #7a2410; }
+
+#masa { flex: 1; overflow: auto; padding: 24px 16px 48px; }
+#karsilama { max-width: 520px; margin: 15vh auto; text-align: center; opacity: .75; }
+
+/* Kâğıtlar: ölçüler UDF ile birebir (pt → px, sayfa.ts PT). Kâğıtlar, üst/alt bilgi ve sayfa numarası metnin
+   altındaki katmanda; metin tek akış, sayfa sınırlarında sayfa.ts boşluk bırakır. */
+.sayfa { position: relative; margin: 0 auto; color: #000; }
+.katman { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.kagit { position: absolute; left: 0; right: 0; background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.04); }
+.katman .kenar, .katman .sayfa-no { position: absolute; }
+.katman .kenar { opacity: .9; }
+.sayfa-no { line-height: 1; white-space: nowrap; }
+.govde { position: relative; z-index: 1; box-sizing: border-box; }
+.sayfa-boslugu { display: block; user-select: none; pointer-events: none; }
+.ProseMirror { outline: none; white-space: pre-wrap; word-wrap: break-word; }
+.p { margin: 0; min-height: 1em; }
+.p[data-onek]::before { content: attr(data-onek) " "; }
+.sekme { display: inline-block; width: 36pt; height: 1em; }
+.alan { background: rgba(124,154,126,.12); border-radius: 2px; }
+.resim { vertical-align: bottom; max-width: 100%; }
+#arac-cubugu .secici { height: 32px; border: 1px solid var(--kenar); border-radius: 8px; background: var(--cubuk);
+  color: var(--yazi); font: inherit; padding: 0 6px; }
+#arac-cubugu select.secici { max-width: 150px; }
+#arac-cubugu input[type=color].secici { width: 38px; padding: 2px; }
+#sayfa-sayisi { opacity: .7; margin-left: 10px; white-space: nowrap; }
+#arac-cubugu button svg { display: block; margin: 0 auto; }
+
+/* Yakınlaştırma: sayfa ölçek kabında (main.ts olcekUygula) */
+.olcek-kap { margin: 0 auto; }
+.olcek-kap > .sayfa { transform-origin: 0 0; margin: 0; }
+#arac-cubugu select.olcek { max-width: 140px; }
+
+/* Kompakt görünüm (dar pencere, ör. Çoklu UYAP yanında): araç çubuğu tek satır ve kaydırılabilir, kenar boşlukları
+   küçük, sayfa pencere genişliğine sığar */
+body.kompakt #arac-cubugu { flex-wrap: nowrap; overflow-x: auto; gap: 2px; padding: 3px 4px; scrollbar-width: thin; }
+body.kompakt #arac-cubugu button { min-width: 28px; height: 28px; padding: 0 6px; flex-shrink: 0; white-space: nowrap; }
+body.kompakt #arac-cubugu .secici { height: 28px; padding: 0 3px; flex-shrink: 0; }
+body.kompakt #arac-cubugu select.secici { max-width: 92px; }
+body.kompakt #arac-cubugu .ayrac { margin: 0 2px; flex-shrink: 0; }
+body.kompakt #durum, body.kompakt #sayfa-sayisi { display: none; }
+body.kompakt #masa { padding: 6px 4px 24px; }
+body.kompakt #bildirim { padding: 4px 8px; font-size: 13px; }
+body.kompakt .kagit { box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+
+/* Tablolar (sema.ts tablo/satir/hucre, cizim.ts): kutularla; hücre iç boşluğu udf_pdf ile aynı (2 pt × 1 pt).
+   Kenarlıklar ince siyah çizgi; komşu hücrelerinkiler üst üste biner (tek çizgi görünür). */
+.tablo { display: block; }
+.satir { display: grid; }
+.hucre { padding: 1pt 2pt; min-width: 0; overflow-wrap: anywhere; }
+.tablo[data-kenarlik="Hucre"] .hucre { box-shadow: 0 0 0 0.5pt #000; margin: 0.25pt; }
+.tablo[data-kenarlik="Tablo"] { box-shadow: 0 0 0 0.5pt #000; }
+.ProseMirror .tablo .hucre:focus-within { background: rgba(124,154,126,.06); }
+
+/* İmza bildirimi ve imza penceresi */
+#bildirim.imza { background: #e6ebe3; color: #2f3d30; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#bildirim.imza.hata { background: #f7dcd3; color: #7a2410; }
+#bildirim button { height: 28px; padding: 0 10px; border: 1px solid currentColor; border-radius: 8px; background: transparent;
+  color: inherit; font: inherit; cursor: pointer; }
+.pencere-ort { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center;
+  z-index: 10; padding: 16px; }
+.pencere { width: min(440px, 100%); background: var(--cubuk); color: var(--yazi); border: 1px solid var(--kenar); border-radius: 14px;
+  padding: 18px 20px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+.pencere h2 { margin: 0 0 4px; font-size: 18px; }
+.pencere-aciklama { margin: 0 0 8px; opacity: .8; font-size: 13px; }
+.pencere label { font-size: 13px; opacity: .8; margin-top: 4px; }
+.pencere .secici { height: 34px; border: 1px solid var(--kenar); border-radius: 8px; background: var(--zemin); color: var(--yazi);
+  font: inherit; padding: 0 8px; }
+.pencere-durum { min-height: 1.2em; margin: 6px 0 0; font-size: 13px; }
+.pencere-durum.hata { color: var(--uyari); }
+.pencere-dugmeler { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.pencere-dugmeler button { height: 34px; padding: 0 16px; border: 1px solid var(--kenar); border-radius: 8px; background: transparent;
+  color: var(--yazi); font: inherit; cursor: pointer; }
+.pencere-dugmeler button.birincil { background: var(--vurgu-koyu); border-color: var(--vurgu-koyu); color: #fff; }
+.pencere-dugmeler button:disabled { opacity: .5; cursor: default; }

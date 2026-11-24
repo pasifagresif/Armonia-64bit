@@ -170,7 +170,14 @@ pub fn icerik_oku(xml: &str) -> Result<UdfOkuma, UdfHatasi> {
                     }
                 }
             }
-            ad => o.uyar(format!("tanınmayan öğe <{ad}> korunmadı")),
+            ad => {
+                // Metin konumu taşımayan tanınmayan öğe ham hâliyle korunur (UYAP web: <webID id=".."/>)
+                if c.descendants().any(|n| n.attribute("startOffset").is_some()) {
+                    o.uyar(format!("tanınmayan öğe <{ad}> korunmadı"));
+                } else {
+                    belge.ek_ogeler.push(xml[c.range()].to_string());
+                }
+            }
         }
     }
     Ok(UdfOkuma { belge, imzali: false, uyarilar: o.uyarilar })
@@ -299,30 +306,34 @@ pub fn yaz(belge: &Belge) -> Result<Vec<u8>, String> {
 }
 
 /// `content.xml` metnini üretir. Metin konumları baştan hesaplanır (UTF-16 birimi).
+///
+/// Biçim UYAP editörünün yazdığıyla aynıdır (gerçek UDF ile karşılaştırıldı, 23.11): sıra üst bilgi → gövde →
+/// alt bilgi (hem öğelerde hem metinde), konum özellikleri öğenin SONUNDA, öğeler arasında satır sonu yok, metnin
+/// sonunda hiçbir öğenin göstermediği bir "\n" (Java Swing belgesi sonunda her zaman bir satır sonu tutar).
 pub fn icerik_yaz(belge: &Belge) -> String {
     let mut y = Yazici { metin: String::new(), konum: 0, xml: String::new() };
     if let Some(k) = &belge.ust_bilgi {
         y.kenar("header", k);
     }
-    if let Some(k) = &belge.alt_bilgi {
-        y.kenar("footer", k);
-    }
     for b in &belge.govde {
         y.blok(b);
     }
+    if let Some(k) = &belge.alt_bilgi {
+        y.kenar("footer", k);
+    }
+    y.metin.push('\n');
     let mut s = String::with_capacity(y.xml.len() + y.metin.len() + 1024);
-    s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n");
-    s.push_str(&ac("template", &belge.kok));
-    s.push('\n');
+    s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\" ?> \n\n");
+    s.push_str(&format!("<template{} >\n", oz_metni(&belge.kok)));
     s.push_str("<content><![CDATA[");
     s.push_str(&cdata(&y.metin));
     s.push_str("]]></content>");
     s.push_str("<properties>");
     s.push_str(&bos("pageFormat", &belge.sayfa));
     s.push_str("</properties>\n");
-    s.push_str(&ac("elements", &belge.govde_oz));
+    s.push_str(&format!("<elements{} >\n", oz_metni(&belge.govde_oz)));
     s.push_str(&y.xml);
-    s.push_str("</elements>\n<styles>");
+    s.push_str("\n</elements>\n<styles>");
     for st in &belge.stiller {
         let mut oz = st.oz.clone();
         if oz.al("name").is_none() {
@@ -330,7 +341,13 @@ pub fn icerik_yaz(belge: &Belge) -> String {
         }
         s.push_str(&bos("style", &oz));
     }
-    s.push_str("</styles>\n</template>\n");
+    s.push_str("</styles>\n");
+    // UYAP web biçimi: her ek öğeden sonra boş satır (gerçek UDF ile denendi)
+    for e in &belge.ek_ogeler {
+        s.push_str(e);
+        s.push_str("\n\n");
+    }
+    s.push_str("</template>\n");
     s
 }
 
@@ -357,7 +374,7 @@ impl Yazici {
                 for c in &p.parcalar {
                     self.parca(c);
                 }
-                self.xml.push_str("</paragraph>\n");
+                self.xml.push_str("</paragraph>");
             }
             Blok::Tablo(t) => {
                 self.xml.push_str(&ac("table", &t.oz));
@@ -372,7 +389,7 @@ impl Yazici {
                     }
                     self.xml.push_str("</row>");
                 }
-                self.xml.push_str("</table>\n");
+                self.xml.push_str("</table>");
             }
         }
     }
@@ -380,8 +397,9 @@ impl Yazici {
     fn parca(&mut self, c: &Parca) {
         let m = gecerli_xml_metni(c.metin());
         let uz = m.encode_utf16().count();
-        let mut oz = Ozellikler(vec![("startOffset".into(), self.konum.to_string()), ("length".into(), uz.to_string())]);
-        oz.0.extend(c.oz().0.iter().cloned());
+        let mut oz = c.oz().clone();
+        oz.0.push(("startOffset".into(), self.konum.to_string()));
+        oz.0.push(("length".into(), uz.to_string()));
         self.xml.push_str(&bos(c.etiket(), &oz));
         self.metin.push_str(&m);
         self.konum += uz;
@@ -389,7 +407,19 @@ impl Yazici {
 }
 
 fn oz_metni(oz: &Ozellikler) -> String {
-    oz.0.iter().map(|(a, d)| format!(" {a}=\"{}\"", kacis(d))).collect()
+    oz.0.iter()
+        .map(|(a, d)| {
+            if a == "imageData" {
+                // UYAP base64 resim verisini satırlara böler (ham "\n"). XML okuyucusu özellikteki satır sonunu
+                // boşluğa çevirir; base64'te boşluk olamayacağı için boşluklar yeniden ham satır sonu yazılır.
+                // Sonuç UYAP'ın yazdığıyla bayt bayt aynı (gerçek UDF ile denendi, 23.11).
+                let temiz: String = d.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | ' ')).collect();
+                format!(" {a}=\"{}\"", temiz.replace(' ', "\n"))
+            } else {
+                format!(" {a}=\"{}\"", kacis(d))
+            }
+        })
+        .collect()
 }
 
 fn ac(etiket: &str, oz: &Ozellikler) -> String {

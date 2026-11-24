@@ -1,0 +1,5 @@
+# Armonia Yazi (belge editoru, Tauri): WebKitGTK calisma kitapligi ve web icerigi kum havuzu (bubblewrap).
+# Yalniz YAZI=1 iken girer (iso_derle: config/package-lists/e kopyalanir; pi_derle: ayrica kurulur). Claude, 2026-11-24.
+libwebkit2gtk-4.1-0
+bubblewrap
+xdg-dbus-proxy

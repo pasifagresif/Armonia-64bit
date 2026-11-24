@@ -2,6 +2,8 @@
 # Armonia ISO'sunu live-build ile derler. 2026-11-19'dan beri temel masaustu imaji; kasa ve PostgreSQL GIRMEZ (kasa/ rafta).
 # COKLUUYAP=1 (varsayilan, 23.11): Coklu UYAP (uyap_app, Rust Linux surumu) MENUDEN acilan, kum havuzlu katman olarak
 # girer; acilista HICBIR sey baslatmaz (cokluuyap-katmani/menuden/, cokluuyap_hazirla.sh). COKLUUYAP=0: katmansiz.
+# YAZI=1 (varsayilan, 24.11): Armonia Yazi (belge editoru, kum havuzlu) + imza hizmeti (yazi-katmani/, yazi_hazirla.sh;
+# ikililer armonia-yazi/derle.sh ciktisindan). YAZI=0: katmansiz.
 # Root ile:  wsl -d Debian -u root -- bash /mnt/c/.../armonia-linux/iso_derle.sh   (ya da: sudo bash .../iso_derle.sh)
 #   TEST=1 ... iso_derle.sh  -> test katmani da eklenir (kasa bicimlendirme, lynis), cikti armonia_test_kasa.iso
 # Cikti: ISO_DIZIN/armonia.iso  (varsayilan: /mnt/c/dev varsa orasi = C:\dev, yoksa /root/armonia-cikti)
@@ -23,6 +25,8 @@ TEST="${TEST:-0}"
 WINDOWS="${WINDOWS:-1}"
 # Coklu UYAP katmani (menuden; uyap_app derle_uyap.sh ciktisindan, x86_64)
 COKLUUYAP="${COKLUUYAP:-1}"
+# Armonia Yazi katmani (belge editoru + imza hizmeti; armonia-yazi/derle.sh ciktisindan, x86_64)
+YAZI="${YAZI:-1}"
 # TEST=1 katmani (kasa bicimlendirme/dogrulama) kasa katmanina dayanir; temel masaustu imajinda kasa yok
 [ "$TEST" = "1" ] && { echo "HATA: TEST=1 kasa katmani ister; temel imajda kullanilmaz (Coklu UYAP asamasinda geri gelecek)"; exit 1; }
 [ "$(id -u)" = "0" ] || { echo "HATA: root ile calistirin (live-build root ister)"; exit 1; }
@@ -107,6 +111,11 @@ bash "$KAYNAK/uygulamalari_hazirla.sh" config/includes.chroot x86_64
 if [ "$COKLUUYAP" = "1" ]; then
   bash "$KAYNAK/cokluuyap_hazirla.sh" config/includes.chroot x86_64 config/hooks/normal
 fi
+if [ "$YAZI" = "1" ]; then
+  bash "$KAYNAK/yazi_hazirla.sh" config/includes.chroot x86_64 config/hooks/normal
+  # WebKitGTK yalniz bu katmanla girer (denetci 24.11 D9)
+  cp "$KAYNAK/yazi-katmani/package-lists/yazi.list.chroot" config/package-lists/
+fi
 # Plymouth temasi. (Faz 2 kasa katmani -- LUKS2 kasa + PostgreSQL -- Coklu UYAP icindi; bu imaja girmez.)
 mkdir -p config/includes.chroot/usr/share/plymouth/themes/armonia
 cp "$KAYNAK"/plymouth/armonia/* config/includes.chroot/usr/share/plymouth/themes/armonia/
@@ -142,6 +151,10 @@ chmod 0755 config/includes.chroot/opt/armonia/bin/ayar-yardimci config/includes.
 [ -f config/includes.chroot/usr/local/bin/xdg-open ] && chmod 0755 config/includes.chroot/usr/local/bin/xdg-open
 # Coklu UYAP ikilisi (yukaridaki genel 0644 x bitini siler; kanca -x sinamasi icin, denetci 23.11 K1)
 [ -f config/includes.chroot/opt/armonia/cokluuyap/uyap_app ] && chmod 0755 config/includes.chroot/opt/armonia/cokluuyap/uyap_app
+# Armonia Yazi ikilileri (ayni neden)
+for f in armonia-yazi armonia-imza; do
+  if [ -f "config/includes.chroot/opt/armonia/yazi/$f" ]; then chmod 0755 "config/includes.chroot/opt/armonia/yazi/$f"; fi
+done
 BAS=$(date +%s)
 set +e; lb build >"$IS/build.log" 2>&1; RC=$?; set -e
 echo "lb build cikis: $RC  sure: $(( $(date +%s) - BAS )) sn"
@@ -206,6 +219,17 @@ if [ "$COKLUUYAP" = "1" ]; then
   done
 else
   grep -qE 'opt/armonia/cokluuyap' <<<"$LISTE" && { echo "HATA: COKLUUYAP=0 ama imajda Coklu UYAP var"; exit 5; }
+fi
+# Armonia Yazi (24.11): uygulama, imza hizmeti, soketler ve kanca ciktisi
+if [ "$YAZI" = "1" ]; then
+  for g in 'opt/armonia/yazi/armonia-yazi$' 'opt/armonia/yazi/armonia-imza$' 'armonia-yazi@\.service$' 'armonia-imza\.service$' \
+           'sockets\.target\.wants/armonia-imza\.socket$' 'sockets\.target\.wants/armonia-yazi\.socket$' 'armonia-yazi@\.service\.d/20-calisma\.conf$' \
+           'armonia-tarayici@\.service\.d/40-imza-soketi\.conf$' 'armonia-cokluuyap\.service\.d/40-imza-soketi\.conf$' \
+           'usr/lib/x86_64-linux-gnu/libwebkit2gtk-4\.1\.so\.0$'; do
+    grep -qE "$g" <<<"$LISTE" || { echo "HATA: Armonia Yazi katmaninda $g yok"; exit 5; }
+  done
+else
+  grep -qE 'opt/armonia/yazi|libwebkit2gtk-4\.1' <<<"$LISTE" && { echo "HATA: YAZI=0 ama imajda Armonia Yazi/WebKitGTK var"; exit 5; }
 fi
 # DNS: live-build resolv.conf'u bos birakir; acilista tmpfiles ile resolved stub'ina baglanmali.
 # Icerik denetlenir (guvenlik-denetci D2). Boru + grep -q KULLANMA: pipefail altinda unsquashfs SIGPIPE alir

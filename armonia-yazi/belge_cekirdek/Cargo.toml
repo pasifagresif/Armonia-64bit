@@ -9,3 +9,9 @@ publish = false
 # ruyap ile aynı sürümler; ikisi de WebAssembly'de çalışır (deflate: saf Rust miniz_oxide)
 zip = { version = "2", default-features = false, features = ["deflate"] }
 roxmltree = "0.20"
+base64 = "0.22"
+# Arayüze (WebAssembly / Tauri) JSON aktarımı için; çekirdeğin kendisi gerektirmez
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]

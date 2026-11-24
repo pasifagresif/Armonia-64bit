@@ -1,0 +1,66 @@
+#!/bin/sh
+# Armonia Yazı (belge editörü) ve imza hizmeti katmanı. ISO'da live-build kancası, Pi'de chroot içinde çalışır;
+# 0100-armonia'dan SONRA (armonia kullanıcısı, dock, mimeapps hazır olmalı). Claude, 2026-11-24.
+set -eu
+A=/opt/armonia/yazi
+for f in armonia-yazi armonia-imza; do
+  [ -f "$A/$f" ] || { echo "HATA: $A/$f yok"; exit 1; }
+done
+# Uygulama dizini root'a ait ve salt okunur
+chown -R root:root "$A"
+chmod 0755 "$A" "$A/armonia-yazi" "$A/armonia-imza" /opt/armonia/bin/yazi_ac.sh /opt/armonia/bin/yazi_calistir.sh
+[ -f "$A/SURUM" ] && chmod 0644 "$A/SURUM"
+# WebKitGTK çalışma kitaplığı imajda olmalı (bubblewrap: Debian bağımlılığı; 4.1 API kum havuzu şimdilik kapalı, denetçi 24.11 O1)
+for k in /usr/lib/*/libwebkit2gtk-4.1.so.0 /usr/bin/bwrap; do
+  [ -e "$k" ] || { echo "HATA: $k yok (paket listesi: libwebkit2gtk-4.1-0, bubblewrap)"; exit 1; }
+done
+# Eksik paylaşımlı kitaplık kalmasın
+if ldd "$A/armonia-yazi" | grep -q 'not found'; then
+  echo "HATA: armonia-yazi kitaplıkları eksik:"; ldd "$A/armonia-yazi" | grep 'not found'; exit 1
+fi
+
+# İmza hizmeti: ayrı sistem kullanıcısı, gruplarsız, giriş yok
+id armonia-imza >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /var/lib/armonia-imza --shell /usr/sbin/nologin armonia-imza
+systemctl enable armonia-imza.socket armonia-yazi.socket
+# Hizmet etkinleştirilmez: ilk istekte soket başlatır
+grep -q '^\[Install\]' /etc/systemd/system/armonia-imza.service && { echo "HATA: imza hizmetinde [Install] var"; exit 1; }
+
+# Veri klasörü imajda hazır (birimin BindPaths'i için; birimdeki runuser satırı silinirse yeniden açar)
+install -d -o armonia -g armonia -m 0700 /home/armonia/.local/share/armonia-yazi
+
+# /run/user tmpfs içine yalnız Wayland soketi (UID kancada belli olur)
+U=$(id -u armonia)
+install -d -m 0755 /etc/systemd/system/armonia-yazi@.service.d
+printf '# Kanca uretti (armonia UID=%s). Kum havuzunda /run/user icinde yalniz Wayland soketi.\n[Service]\nBindPaths=/run/user/%s/wayland-0\n' \
+  "$U" "$U" > /etc/systemd/system/armonia-yazi@.service.d/20-calisma.conf
+
+# Tarayıcı ve Çoklu UYAP kum havuzlarında imza hizmetinin soket DİZİNİ görünmesin (onlar UYAP portalı üzerinden
+# imzalar). Dizin gizlenir: soket yeniden oluşturulsa da gizli kalır (denetçi 24.11 D1).
+for b in armonia-tarayici@.service armonia-cokluuyap.service; do
+  install -d -m 0755 "/etc/systemd/system/$b.d"
+  printf '# Armonia Yazı katmanı (0220): imza hizmeti yalnız Armonia Yazı ve oturum içindir.\n[Service]\nInaccessiblePaths=-/run/armonia-imza -/run/armonia-yazi.sock\n' \
+    > "/etc/systemd/system/$b.d/40-imza-soketi.conf"
+done
+
+# UDF dosya türü ve çift tıkla açma
+update-mime-database /usr/share/mime
+M=/etc/xdg/mimeapps.list
+grep -q '^application/x-uyap-udf=' "$M" || printf 'application/x-uyap-udf=armonia-yazi.desktop\n' >> "$M"
+grep -q '^application/vnd.openxmlformats-officedocument.wordprocessingml.document=' "$M" \
+  || printf 'application/vnd.openxmlformats-officedocument.wordprocessingml.document=armonia-yazi.desktop\n' >> "$M"
+grep -q '^application/x-uyap-udf=armonia-yazi.desktop$' "$M" || { echo "HATA: mimeapps'e UDF eklenemedi"; exit 1; }
+command -v update-desktop-database >/dev/null && update-desktop-database /usr/local/share/applications || true
+
+# Dock: "Yazı" kutucuğu Armonia Yazı'yı açar; LibreOffice Writer menüde kalır (PDF/RTF vb. için)
+D=/etc/armonia/waybar/dock.jsonc
+sed -i 's|^  "custom/yazi": .*|  "custom/yazi": { "format": "Yazı\\n ", "justify": "center", "tooltip-format": "Armonia Yazı (UDF ve Word)", "on-click": "/opt/armonia/bin/yazi_ac.sh" },|' "$D"
+grep -q '"on-click": "/opt/armonia/bin/yazi_ac.sh"' "$D" || { echo "HATA: dock'a Armonia Yazı bağlanamadı"; exit 1; }
+
+# Masaüstü oturumu 5975'e doğrudan gidemez (sertlestirme/etc/nftables.conf oturum_yerel); denetle. oturum_yerel
+# bloğunda 5975 geçen ve reject olmayan hiçbir kural olmamalı; reddetme kuralı olmalı (denetçi 24.11 D8).
+OY=$(sed -n '/chain oturum_yerel/,/^    }/p' /etc/nftables.conf | grep -v '^[[:space:]]*#')
+if printf '%s\n' "$OY" | grep '5975' | grep -qv 'reject'; then
+  echo "HATA: oturum_yerel 5975'e izin veriyor olabilir (imza günlüğü atlanabilir)"; exit 1
+fi
+printf '%s\n' "$OY" | grep -q 'fib daddr type local tcp dport 5975 reject' || { echo "HATA: oturum_yerel'de 5975 reddi yok"; exit 1; }
+echo "Armonia Yazı katmanı hazır ($(sed -n 's/^surum=//p' "$A/SURUM" 2>/dev/null))"

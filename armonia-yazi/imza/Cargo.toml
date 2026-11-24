@@ -1,0 +1,27 @@
+[package]
+name = "imza"
+version = "0.1.0"
+edition = "2021"
+description = "Armonia Yazı e-imza: UDF imzalama (CAdES, UYAP sign.sgn), imza doğrulama, kart (PKCS#11), imza hizmeti ve imza günlüğü"
+publish = false
+
+[[bin]]
+name = "armonia-imza"
+path = "src/bin/armonia-imza.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libloading = "0.8"
+x509-parser = "0.16"
+ring = "0.17"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+rcgen = "0.13"

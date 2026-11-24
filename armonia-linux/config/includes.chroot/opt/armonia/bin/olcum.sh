@@ -64,7 +64,7 @@ if grep -q 'armonia.olcum_tarayici=1' /proc/cmdline; then
   echo "tarayici slice -> 127.0.0.1:631 (reddedilmeli): $(tdene 127.0.0.1 631)"
   echo "tarayici slice -> 192.168.1.1:80 (reddedilmeli): $(tdene 192.168.1.1 80)"
   echo "tarayici slice -> avukat.uyap.gov.tr:443 (ACIK olmali): $(tdene avukat.uyap.gov.tr 443)"
-  echo "kontrol: system.slice -> 127.0.0.1:5975 (ACIK olmali): $(timeout 15 systemd-run --quiet --wait --pipe --collect -p User=armonia /bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/5975 && echo ACIK' 2>&1 | tail -1)"
+  echo "oturum (armonia, dilimsiz) -> 127.0.0.1:5975 (24.11: reddedilmeli; imza yalniz armonia-imza ile): $(timeout 15 systemd-run --quiet --wait --pipe --collect -p User=armonia /bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/5975 && echo ACIK' 2>&1 | tail -1)"
   echo "nft sayaclari: $(nft list chain inet filter tarayici_yerel 2>&1 | grep -o 'packets [0-9]*' | tr '\n' ' ')"
   nft list ruleset 2>/dev/null | grep -n "tarayici_yerel" | head -3
   journalctl -b -u 'armonia-tarayici@*' --no-pager -o cat 2>&1 | grep -viE 'dbus|fontconfig' | tail -15
