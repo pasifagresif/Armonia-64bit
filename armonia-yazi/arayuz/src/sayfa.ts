@@ -91,29 +91,80 @@ function segmentGenisligi(sekme: HTMLElement, olcek: number): number {
   return r.getBoundingClientRect().width / olcek;
 }
 
+/** Sekme genişlikleri. Satır sonunu aşan sekme UYAP'taki (Swing) gibi alt satıra iner ve orada durağı satır
+ * başından yeniden hesaplanır (`kirik`: önüne zorunlu satır sonu). UYAP'ta tarayıcıdan farklı olarak satır sekmeden
+ * önce kırılabilir; ardından gelen metin sığmazsa bir alt satıra geçer. Önceden taşan sekmenin yeri yanlış satırda
+ * ölçülüyor, imza bloğundaki "26.11.2026⇥⇥⇥…Müşteki Vekili" metni sağa itiliyordu (UYAP Doküman Editörü 5.4.20 ile
+ * karşılaştırıldı, 26.11.2026). Kırılan satır iki yana yaslanmaz: Swing de yalnız satırdaki son sekmeden sonraki
+ * boşlukları açar; sekmeyle biten satırda açacak boşluk kalmaz. */
 export function sekmeleriYerlestir(kok: HTMLElement, olcek = 1) {
-  for (const p of kok.querySelectorAll<HTMLElement>(".p")) {
-    const sekmeler = p.querySelectorAll<HTMLElement>(".sekme");
-    if (!sekmeler.length) continue;
-    let duraklar: Durak[] = [];
-    try {
-      duraklar = JSON.parse(p.dataset.sekmeler || "[]");
-    } catch {
-      duraklar = [];
-    }
-    const cs = getComputedStyle(p);
-    for (const s of sekmeler) {
-      s.style.width = "0px";
-      const solKenar = p.getBoundingClientRect().left + parseFloat(cs.paddingLeft) * olcek;
-      const x = (s.getBoundingClientRect().left - solKenar) / olcek / PT; // pt, sol girintiye göre
-      const d = sonrakiDurak(x, duraklar);
-      let g = d.konum - x;
-      if (d.hiza === 1 || d.hiza === 2 || d.hiza === 4) {
-        const seg = segmentGenisligi(s, olcek) / PT;
-        g = Math.max(0, g - (d.hiza === 2 ? seg / 2 : seg));
+  const ps = [...kok.querySelectorAll<HTMLElement>(".p")].filter((p) => p.querySelector(".sekme"));
+  if (!ps.length) return;
+  // 1. Hangi sekmenin alt satıra ineceğine sola yaslı düzende karar verilir: iki yana yaslı satır kırılınca
+  // yaslanmaz olur, yaslıyken ölçülen konumlar kayardı. Stil editör DOM'una dokunmadan açılıp kapanır.
+  const st = solaYaslaStili();
+  st.media = "all";
+  try {
+    for (const p of ps) paragrafSekmeleri(p, olcek, true);
+  } finally {
+    st.media = "not all";
+  }
+  // 2. İki yana yaslı paragrafta genişlikler asıl düzende yeniden ölçülür (kararlar korunur)
+  for (const p of ps) if (getComputedStyle(p).textAlign === "justify") paragrafSekmeleri(p, olcek, false);
+}
+
+let solStil: HTMLStyleElement | null = null;
+function solaYaslaStili(): HTMLStyleElement {
+  if (!solStil) {
+    solStil = document.createElement("style");
+    solStil.media = "not all";
+    solStil.textContent = ".p { text-align: left !important; }";
+    document.head.append(solStil);
+  }
+  return solStil;
+}
+
+function paragrafSekmeleri(p: HTMLElement, olcek: number, karar: boolean) {
+  const sekmeler = p.querySelectorAll<HTMLElement>(".sekme");
+  let duraklar: Durak[] = [];
+  try {
+    duraklar = JSON.parse(p.dataset.sekmeler || "[]");
+  } catch {
+    duraklar = [];
+  }
+  const cs = getComputedStyle(p);
+  // Sonraki sekmelerin eski genişlikleri satır kırılmasını (dolayısıyla ölçülen konumu) etkilemesin
+  for (const s of sekmeler) {
+    if (karar) s.classList.remove("kirik");
+    s.style.width = "0px";
+    s.style.removeProperty("--sekme-g");
+  }
+  for (const s of sekmeler) {
+    let kirik = !karar && s.classList.contains("kirik");
+    let x = 0;
+    if (!kirik) {
+      const pr = p.getBoundingClientRect();
+      const solKenar = pr.left + parseFloat(cs.paddingLeft) * olcek;
+      x = (s.getBoundingClientRect().left - solKenar) / olcek / PT; // pt, sol girintiye göre
+      if (karar) {
+        const sag = (pr.width / olcek - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)) / PT;
+        kirik = x > PAY && sonrakiDurak(x, duraklar).konum > sag + PAY;
+        if (kirik) {
+          s.classList.add("kirik");
+          x = 0;
+        }
       }
-      s.style.width = `${Math.max(0, g) * PT}px`;
     }
+    const d = sonrakiDurak(x, duraklar);
+    let g = d.konum - x;
+    if (d.hiza === 1 || d.hiza === 2 || d.hiza === 4) {
+      const seg = segmentGenisligi(s, olcek) / PT;
+      g = Math.max(0, g - (d.hiza === 2 ? seg / 2 : seg));
+    }
+    const px = `${Math.max(0, g) * PT}px`;
+    // Kırık sekme satır içi kutudur (satır sonu içinde kalsın); genişliği satır sonundan sonraki ::after'da
+    if (kirik) s.style.setProperty("--sekme-g", px);
+    else s.style.width = px;
   }
 }
 

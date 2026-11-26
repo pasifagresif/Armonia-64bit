@@ -53,6 +53,10 @@ body { display: flex; flex-direction: column; }
 .p { margin: 0; min-height: 1em; }
 .p[data-onek]::before { content: attr(data-onek) " "; }
 .sekme { display: inline-block; width: 36pt; height: 1em; }
+/* Satır sonunu aşan sekme (sayfa.ts sekmeleriYerlestir): önünde satır sonu, genişliği alt satırda (::after) */
+.sekme.kirik { display: inline; width: auto !important; }
+.sekme.kirik::before { content: "\A"; white-space: pre; }
+.sekme.kirik::after { content: ""; display: inline-block; width: var(--sekme-g, 0); height: 1em; }
 .alan { background: rgba(124,154,126,.12); border-radius: 2px; }
 .resim { vertical-align: bottom; max-width: 100%; }
 #arac-cubugu .secici { height: 32px; border: 1px solid var(--kenar); border-radius: 8px; background: var(--cubuk);
