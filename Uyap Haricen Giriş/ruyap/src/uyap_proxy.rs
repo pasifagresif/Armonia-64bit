@@ -559,12 +559,28 @@ pub fn _rewrite_body(content_type: &str, body: &[u8], proxy_base: &str, inject: 
             replaced.push_str(&script);
             replaced.push_str(&text[pos + "<body>".len()..]);
             text = replaced;
-        } else {
+        } else if _tam_html_belgesi_mi(&text) {
             text = format!("{}{}", script, text);
         }
+        // Aksi halde gövde tam sayfa değil: UYAP'ın XHR ile aldığı "text/html" etiketli kısa yanıtlar (ör. evrak
+        // görüntülenemediğinde dönen hata metni). UYAP bunları olduğu gibi uyarı penceresinde gösterir; başa stil/betik
+        // eklersek pencerede armonia-renk.css'in ham metni görünüyordu (2026-11-26). Bu yanıtlara dokunulmaz.
     }
 
     text.into_bytes()
+}
+
+/// `<head>`/`<body>` etiketi bulunmayan gövdenin yine de tarayıcıda sayfa olarak açılacak bir HTML belgesi olup
+/// olmadığı: yalnız `<!doctype` ya da `<html` ile başlıyorsa evet.
+fn _tam_html_belgesi_mi(text: &str) -> bool {
+    let bas: String = text
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .chars()
+        .take(9)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    bas.starts_with("<!doctype") || bas.starts_with("<html")
 }
 
 const INLINE_INJECT_SCRIPT: &str = r#####"<script>
