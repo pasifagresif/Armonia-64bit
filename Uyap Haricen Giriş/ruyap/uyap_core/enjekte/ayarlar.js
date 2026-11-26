@@ -8,6 +8,7 @@
 //   • IBAN'larım (vekil): birden çok, etiketli, bir varsayılan. Evrak listesinde tahsilat makbuzuna sağ tık →
 //     "Parayı iste → Kayıtlı IBAN'ıma" bu listeyi kullanır (uyap_proxy.rs).
 //   • Alacaklı IBAN'ları: dosya başına kayıtlar (sağ tık penceresinde girilir); burada görülür, silinir.
+//   • Antetlerim: büro antetleri (src/antet.rs); Yazı editörünün "Antet" menüsü kullanır, varsayılan yeni belgeye konur.
 // Veri ofis bilgisayarındaki büro veritabanında (/__cu__/veri/ibanlar…; src/iban.rs). UYAP'a istek atılmaz.
 // UYAP'ın kendi "IBAN Bilgilerim" listesi IBAN'ı yıldızlı döndürdüğü için oradan içe aktarma yok.
 (function() {
@@ -158,6 +159,7 @@
     const BOLUMLER = [
         { kimlik: 'iban', ad: 'IBAN\'larım', ikon: '🏦', ciz: ibanCiz },
         { kimlik: 'alacakli', ad: 'Alacaklı IBAN\'ları', ikon: '📄', ciz: alacakliCiz },
+        { kimlik: 'antet', ad: 'Antetlerim', ikon: '🖼️', ciz: antetCiz },
     ];
     let kok = null, navEl = null, anaEl = null, gorunum = 'kapali';
     let bolum = oku(BOLUM_ANAHTAR, 'iban');
@@ -174,7 +176,7 @@
         const ust = yan.querySelector('.sidebar-top-part') || yan.firstElementChild || yan;
         const ul = e('ul', { id: 'cu-menu-ayarlar', sinif: 'menu-list' + (gorunum === 'acik' ? ' on' : '') }, [
             e('li', { sinif: 'SidebarLink' }, [
-                e('a', { href: '#', title: 'Çoklu UYAP ayarları: IBAN\'larım, alacaklı IBAN\'ları',
+                e('a', { href: '#', title: 'Çoklu UYAP ayarları: IBAN\'larım, alacaklı IBAN\'ları, antetler',
                          onclick: function(ev) { ev.preventDefault(); ac(); } },
                   [e('span', { sinif: 'SidebarLabel', metin: 'Ayarlar' })])
             ])
@@ -445,6 +447,133 @@
             goster();
         }
         ara.addEventListener('input', goster);
+        yukle();
+    }
+
+    // ── Bölüm: Antetlerim (büro geneli) ──
+    // Resim UYAP antedi biçimine çevrilir (armonia-yazi antet.ts resimdenAntet ile aynı kural): PNG, 1 piksel = 1 pt,
+    // en çok 453 pt genişlik (UYAP'ın yeni belgesinde yazı alanı: A4 − 2×2,5 cm) ve 170 pt yükseklik, oran korunur.
+    const ANTET_GEN = 453, ANTET_YUK = 170;
+    function antetHazirla(dosya) {
+        return new Promise(function(tamam, red) {
+            const url = URL.createObjectURL(dosya);
+            const img = new Image();
+            img.onload = function() {
+                try {
+                    const k = Math.min(1, ANTET_GEN / img.naturalWidth, ANTET_YUK / img.naturalHeight);
+                    const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+                    const t = document.createElement('canvas');
+                    t.width = w; t.height = h;
+                    const c = t.getContext('2d');
+                    c.imageSmoothingQuality = 'high';
+                    c.drawImage(img, 0, 0, w, h);
+                    tamam({ resim: t.toDataURL('image/png').replace(/^data:image\/png;base64,/, ''), genislik: w, yukseklik: h });
+                } catch (x) { red(new Error('Resim işlenemedi.')); }
+                URL.revokeObjectURL(url);
+            };
+            img.onerror = function() { URL.revokeObjectURL(url); red(new Error('Resim açılamadı (PNG, JPEG, GIF, BMP ya da WebP olmalı).')); };
+            img.src = url;
+        });
+    }
+    function antetResmi(a, enCok) {
+        const i = e('img', { alt: 'Antet: ' + (a.ad || ''), src: 'data:image/png;base64,' + a.resim,
+            stil: 'display:block;max-width:' + enCok + 'px;width:' + a.genislik + 'px;height:auto;background:#fff;border:1px solid var(--a-kenar);border-radius:6px;padding:4px' });
+        return i;
+    }
+    function antetCiz(kap) {
+        kap.appendChild(e('h2', { metin: 'Antetlerim' }));
+        kap.appendChild(e('p', { sinif: 'a-not', metin: 'Belgelerin üstündeki büro resmi. Yazı editöründe "Antet" menüsünden eklenir; UYAP\'taki gibi sayfa ' +
+            'üst bilgisine konur. Varsayılan antet seçerseniz yeni belgeler onunla açılır. Bir belgedeki anteti editörde ' +
+            '"Antet → Bu anteti büroya kaydet" ile de buraya alabilirsiniz. Büroda herkes kullanır.' }));
+        const hata = e('div', { sinif: 'a-hata', role: 'alert' });
+        const adG = e('input', { type: 'text', placeholder: 'ör. Büro anteti', maxlength: '120', autocomplete: 'off' });
+        const dosyaG = e('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/bmp,image/webp', stil: 'max-width:100%' });
+        const varsG = e('input', { type: 'checkbox' });
+        const onizleme = e('div', { stil: 'margin-top:10px' });
+        let hazir = null;
+        dosyaG.addEventListener('change', async function() {
+            hata.textContent = '';
+            hazir = null;
+            bos(onizleme);
+            const f = dosyaG.files && dosyaG.files[0];
+            if (!f) return;
+            try {
+                hazir = await antetHazirla(f);
+                if (!adG.value.trim()) adG.value = f.name.replace(/\.[^.]+$/, '');
+                onizleme.appendChild(antetResmi(Object.assign({ ad: adG.value }, hazir), 600));
+                onizleme.appendChild(e('div', { sinif: 'alt', stil: 'margin-top:4px', metin: 'Belgede ' + hazir.genislik + ' × ' + hazir.yukseklik + ' pt olarak yer alacak.' }));
+            } catch (x) { hata.textContent = x.message; }
+        });
+        const ekle = async function() {
+            hata.textContent = '';
+            if (!hazir) { hata.textContent = 'Önce bir resim seçin.'; return; }
+            try {
+                await istek('antet_ekle', { ad: adG.value, resim: hazir.resim, genislik: hazir.genislik, yukseklik: hazir.yukseklik, varsayilan: varsG.checked });
+                adG.value = ''; dosyaG.value = ''; varsG.checked = false; hazir = null; bos(onizleme);
+                bildir('Antet kaydedildi.');
+                yukle();
+            } catch (x) { hata.textContent = x.message; }
+        };
+        kap.appendChild(e('div', { sinif: 'a-kart' }, [
+            e('h3', { metin: 'Yeni antet' }),
+            e('div', { sinif: 'a-form' }, [
+                e('label', null, ['Resim (PNG, JPEG…)', dosyaG]),
+                e('label', null, ['Ad', adG]),
+                e('button', { sinif: 'a-d ana', type: 'button', onclick: ekle, metin: 'Kaydet' })
+            ]),
+            e('label', { stil: 'display:flex;flex-direction:row;align-items:center;gap:6px;margin-top:10px;font-weight:400' }, [varsG, 'Varsayılan antet olsun (yeni belgeler bununla açılır)']),
+            onizleme,
+            hata
+        ]));
+        const liste = e('div', null, [e('div', { sinif: 'a-bilgi', metin: 'Yükleniyor…' })]);
+        kap.appendChild(liste);
+
+        async function yukle() {
+            let l;
+            try { l = await istek('antetler'); } catch (x) { bos(liste).appendChild(e('div', { sinif: 'a-hata', metin: x.message })); return; }
+            l = Array.isArray(l) ? l : [];
+            sayiYaz('antet', l.length);
+            bos(liste);
+            if (!l.length) { liste.appendChild(e('div', { sinif: 'a-bilgi', metin: 'Henüz antet kaydedilmedi. Yukarıdan bir resim seçin.' })); return; }
+            const islem = async function(uc, govde, mesaj) {
+                hata.textContent = '';
+                try { await istek(uc, govde); if (mesaj) bildir(mesaj); yukle(); } catch (y) { hata.textContent = y.message; }
+            };
+            l.forEach(function(x) {
+                const ad = e('span', { sinif: 'a-etiket', metin: x.ad, title: 'Adı değiştirmek için tıklayın', tabindex: '0' });
+                const duzenle = function() {
+                    const i = e('input', { type: 'text', value: x.ad || '', maxlength: '120', stil: 'max-width:320px' });
+                    let bitti = false;
+                    const kaydet = function() { if (bitti) return; bitti = true; islem('antet_ad', { id: x.id, ad: i.value }, 'Antet adı kaydedildi.'); };
+                    i.addEventListener('keydown', function(ev) {
+                        if (ev.key === 'Enter') { ev.preventDefault(); kaydet(); }
+                        else if (ev.key === 'Escape') { ev.stopPropagation(); bitti = true; yukle(); }
+                    });
+                    i.addEventListener('blur', kaydet);
+                    ad.replaceWith(i);
+                    i.focus();
+                };
+                ad.addEventListener('click', duzenle);
+                ad.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') duzenle(); });
+                liste.appendChild(e('div', { sinif: 'a-kart', stil: x.varsayilan ? 'border-color:var(--a-vurgu)' : '' }, [
+                    e('div', { stil: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px' }, [
+                        e('strong', null, [ad]),
+                        x.varsayilan ? e('span', { sinif: 'a-rozet', metin: 'Varsayılan' }) : null,
+                        e('span', { sinif: 'alt', metin: Math.round(x.genislik) + ' × ' + Math.round(x.yukseklik) + ' pt' }),
+                        e('div', { sinif: 'a-bosluk' }),
+                        e('div', { sinif: 'a-eylem' }, [
+                            x.varsayilan
+                                ? e('button', { sinif: 'a-d kucuk', type: 'button', metin: 'Varsayılanı kaldır', title: 'Yeni belgeler antetsiz açılır',
+                                    onclick: function() { islem('antet_varsayilan', { id: null }, 'Varsayılan antet kaldırıldı.'); } })
+                                : e('button', { sinif: 'a-d kucuk', type: 'button', metin: 'Varsayılan yap',
+                                    onclick: function() { islem('antet_varsayilan', { id: x.id }, 'Varsayılan antet değişti.'); } }),
+                            silDugmesi(function() { islem('antet_sil', { id: x.id }, 'Antet silindi.'); })
+                        ])
+                    ]),
+                    antetResmi(x, 860)
+                ]));
+            });
+        }
         yukle();
     }
 

@@ -55,6 +55,7 @@ pub static SEMALAR: &[(i32, &str, &str)] = &[
     (19, "belge_yol", include_str!("sema/0019_belge_yol.sql")),
     (20, "iban", include_str!("sema/0020_iban.sql")),
     (21, "mazbata_iade", include_str!("sema/0021_mazbata_iade.sql")),
+    (22, "antet", include_str!("sema/0022_antet.sql")),
 ];
 
 pub type Gunluk = Arc<dyn Fn(&str) + Send + Sync>;
@@ -780,6 +781,7 @@ mod tests {
             crate::is_api::veritabani_senaryosu(&mut b);
             crate::is_isaret::veritabani_senaryosu(&mut b);
             crate::iban::veritabani_senaryosu(&mut b);
+            crate::antet::veritabani_senaryosu(&mut b);
         }
         // Parola dosyada açık metin olarak durmaz
         let ayar = fs::read_to_string(ayar_yolu()).unwrap();

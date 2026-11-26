@@ -1705,6 +1705,27 @@ fn dagit(c: &mut postgres::Client, yontem: &str, uc: &str, q: &HashMap<String, S
             mazbata_bagla_sonuclu(c, tam(g, "dosya")?, no("tebligat").ok_or("Tebligat seçilmedi.")?, no("mazbata"),
                                   gun_coz(g.get("teblig_tarihi").unwrap_or(&Value::Null))?, evet("iade"), bugun)?
         }
+        // Büro antetleri (Ayarlar → Antetlerim, Armonia Yazı "Antet" menüsü; bkz. antet.rs)
+        ("GET", "antetler") => crate::antet::liste(c)?,
+        ("GET", "antet_varsayilan") => crate::antet::varsayilan(c)?,
+        ("POST", "antet_ekle") => crate::antet::ekle(
+            c, &metin("ad"), &metin("resim"),
+            g.get("genislik").and_then(Value::as_f64).unwrap_or(0.0),
+            g.get("yukseklik").and_then(Value::as_f64).unwrap_or(0.0),
+            evet("varsayilan"),
+        )?,
+        ("POST", "antet_sil") => {
+            crate::antet::sil(c, tam(g, "id")?)?;
+            Value::Null
+        }
+        ("POST", "antet_varsayilan") => {
+            crate::antet::varsayilan_yap(c, teb::tam(g, "id"))?;
+            Value::Null
+        }
+        ("POST", "antet_ad") => {
+            crate::antet::ad_ata(c, tam(g, "id")?, &metin("ad"))?;
+            Value::Null
+        }
         // IBAN kayıtları (Ayarlar penceresi ve "Parayı iste"; bkz. iban.rs)
         ("GET", "ibanlar") => crate::iban::liste(c)?,
         ("POST", "iban_ekle") => crate::iban::ekle(c, &metin("iban"), &metin("etiket"), evet("varsayilan"))?,

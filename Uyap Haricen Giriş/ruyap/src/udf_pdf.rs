@@ -931,7 +931,8 @@ fn _sekme_duraklari(tabset: Option<&str>) -> Vec<(f64, i32)> {
 
 fn _sonraki_durak(x_goreli: f64, duraklar: &[(f64, i32)]) -> (f64, i32) {
     if duraklar.is_empty() {
-        return (((x_goreli / 72.0).floor() + 1.0) * 72.0, 0);
+        // Açık duraklardaki gibi 0,01 pt pay: 71,99999 gibi yuvarlama artığı aynı durağa düşmesin
+        return ((((x_goreli + 0.01) / 72.0).floor() + 1.0) * 72.0, 0);
     }
     for &(poz, hiza) in duraklar {
         if poz > x_goreli + 0.01 {

@@ -1019,6 +1019,23 @@
         if (!w || !d) return;
         hazir = true;
         temaAktar();
+        // Editörün "Antet" menüsü büro antetlerini buradan alır (Ayarlar → Antetlerim; src/antet.rs,
+        // armonia-yazi/arayuz/src/antet.ts Kabuk arayüzü)
+        const antetUc = '/__cu__/veri/';
+        w.armoniaYaziKabuk = {
+            antetler: async function() {
+                const l = await veriYanit(await fetch(antetUc + 'antetler', { credentials: 'include', cache: 'no-store' }));
+                return Array.isArray(l) ? l : [];
+            },
+            varsayilanAntet: async function() {
+                return veriYanit(await fetch(antetUc + 'antet_varsayilan', { credentials: 'include', cache: 'no-store' }));
+            },
+            antetKaydet: async function(ad, a) {
+                await veriYanit(await fetch(antetUc + 'antet_ekle', { method: 'POST', credentials: 'include', cache: 'no-store',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ad: ad, resim: a.resim, genislik: a.genislik, yukseklik: a.yukseklik }) }));
+            },
+        };
         w.addEventListener('keydown', panoTusu, true);
         yakalamaKur(w);
         d.addEventListener('click', imzaDugmesi, true);
