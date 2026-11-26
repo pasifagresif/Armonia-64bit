@@ -1,4 +1,4 @@
 Armonia Yazı derlenmiş arayüzü — buraya araclar/yazi_al.py ile alındı, elle düzenlenmez.
 kaynak: C:\dev\Armonia-64bit\armonia-yazi\arayuz\dist
-kaynak commit: 6988ca1 2026-11-24 23:08:05 +0300 (armonia-yazi'de commit'lenmemiş değişiklik: 7)
-alınma: 2026-11-26 16:07
+kaynak commit: 6988ca1 2026-11-24 23:08:05 +0300 (armonia-yazi'de commit'lenmemiş değişiklik: 8)
+alınma: 2026-11-26 18:47

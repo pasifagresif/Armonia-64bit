@@ -1213,21 +1213,27 @@ fn _paragraf(par: Node, genislik: f64, ctx: &mut Baglam) -> Vec<Blok> {
             }
             ParcaTur::Sekme => {
                 let p = &grup[0];
-                let (poz, th) = _sonraki_durak(x - sol, &duraklar);
-                let mut yeni = sol + poz;
-                if matches!(th, 1 | 2 | 4) {
-                    let mut seg = 0.0;
-                    for (t2, g2) in &atomlar[i + 1..] {
-                        if *t2 == ParcaTur::Sekme {
-                            break;
+                let durak = |x: f64| {
+                    let (poz, th) = _sonraki_durak(x - sol, &duraklar);
+                    let mut yeni = sol + poz;
+                    if matches!(th, 1 | 2 | 4) {
+                        let mut seg = 0.0;
+                        for (t2, g2) in &atomlar[i + 1..] {
+                            if *t2 == ParcaTur::Sekme {
+                                break;
+                            }
+                            seg += g2.iter().map(|q| q.gen).sum::<f64>();
                         }
-                        seg += g2.iter().map(|q| q.gen).sum::<f64>();
+                        yeni = x.max(yeni - if th == 2 { seg / 2.0 } else { seg });
                     }
-                    yeni = x.max(yeni - if th == 2 { seg / 2.0 } else { seg });
-                }
-                if yeni > sinir && icerik_var(&cur) {
+                    yeni
+                };
+                let mut yeni = durak(x);
+                // Satır sonunu aşan sekme UYAP'taki (Swing) gibi alt satıra iner, durağı satır başından yeniden
+                // hesaplanır. Önceden satır kırılıp sekme düşüyordu (editör sayfa.ts sekmeleriYerlestir ile aynı).
+                if yeni > sinir + 0.01 && icerik_var(&cur) && x - sol > 0.01 {
                     satir_bitir(&mut cur, &mut x, &mut son_sekme, &mut satirlar, false);
-                    continue;
+                    yeni = durak(x);
                 }
                 cur.push((
                     x,
