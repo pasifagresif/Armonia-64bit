@@ -12,6 +12,7 @@ import { bloklariCiz } from "./cizim";
 import { belgeDugumu, belgeyeCevir } from "./donustur";
 import { BOYUTLAR, SATIR_ARALIKLARI, YAZI_TIPLERI, etkinYazi, girinti, liste, onekleriYenile, satirAraligi, sekmeleriHizala, yaziDegistir } from "./komutlar";
 import { bosBelgeOlustur } from "./bos_belge";
+import { antetiBul, antetiKoy, kabuk, resimdenAntet, type Antet, type KayitliAntet } from "./antet";
 import { imzaPenceresiAc } from "./imza_penceresi";
 import { b64Coz, b64Kodla, cagir, masaustu, type ImzaBilgisi, type MasaustuDosya, type MasaustuKayit } from "./masaustu";
 import { hucreGec, satirEkle, satirSil, sutunEkle, sutunSil, tabloEkle, tabloSil, tablodaMi } from "./tablo";
@@ -535,6 +536,93 @@ function yeniBelge(tekrarsiz = false) {
   const s = sayfayiKur({ belge, gorunum: g, imzali: false, uyarilar: [] },
     { belge, kok: "Yeni belge", bicim: "udf", gorunum: g, salt: false, yeni: true });
   sekmeEkle_(s);
+  // Büroda varsayılan antet varsa yeni belge onunla açılır (Çoklu UYAP → Ayarlar → Antetlerim)
+  const k = kabuk();
+  if (k) {
+    k.varsayilanAntet()
+      .then((a) => { if (a && etkin === s && !s.degisti) antetUygula(a, false); })
+      .catch(() => {});
+  }
+  antetMenusuDoldur();
+}
+
+// ── Antet ───────────────────────────────────────────────────────────────────────────────────────────
+
+/** Öndeki belgeye antedi koyar / değiştirir / kaldırır (null). Üst bilgi editörde düzenlenmediği için belge
+ * modelde değiştirilip sekmenin sayfası yeniden kurulur (yazılan metin korunur; geri al geçmişi sıfırlanır). */
+function antetUygula(a: Antet | null, degisiklik = true) {
+  const s = etkin;
+  if (!s) return;
+  if (s.acik.salt) {
+    bildir("İmzalı belgede antet değiştirilemez; önce \"Düzenlemeyi aç\".", "uyari");
+    return;
+  }
+  const belge = antetiKoy(belgeyeCevir(s.gorunum.state.doc, s.acik.belge), a);
+  const g = gorunum_hesapla(belge) as Acilis["gorunum"];
+  etkiniGizle();
+  const yeni = sayfayiKur({ belge, gorunum: g, imzali: false, uyarilar: [] }, { ...s.acik, belge, gorunum: g });
+  yeni.degisti = s.degisti || degisiklik;
+  if (degisiklik) yeni.acik.yeni = false;
+  yeni.kaydirma = s.kaydirma;
+  sekmeEkle_(yeni, s);
+  antetMenusuDoldur();
+  if (degisiklik) bildir(a ? "Antet eklendi." : "Antet kaldırıldı.");
+}
+
+let kayitliAntetler: KayitliAntet[] = [];
+
+/** "Antet" menüsü: büro antetleri (kabuk varsa), bilgisayardan resim, kaydet / kaldır. */
+async function antetMenusuDoldur() {
+  const s = secici.antet;
+  const k = kabuk();
+  if (k) {
+    try {
+      kayitliAntetler = await k.antetler();
+    } catch {
+      kayitliAntetler = [];
+    }
+  }
+  const var_ = etkin ? !!antetiBul(etkin.acik.belge) : false;
+  s.textContent = "";
+  s.append(new Option("Antet", ""));
+  for (const a of kayitliAntetler) s.append(new Option(`${var_ ? "Değiştir: " : "Ekle: "}${a.ad}${a.varsayilan ? " (varsayılan)" : ""}`, `k${a.id}`));
+  s.append(new Option(var_ ? "Bilgisayardan başka resim…" : "Bilgisayardan resim seç…", "dosya"));
+  if (var_ && k) s.append(new Option("Bu anteti büroya kaydet…", "kaydet"));
+  if (var_) s.append(new Option("Anteti kaldır", "kaldir"));
+  s.value = "";
+}
+
+async function antetSecildi(d: string) {
+  if (!etkin) return;
+  if (d === "kaldir") return antetUygula(null);
+  if (d === "dosya") return $<HTMLInputElement>("#antet-dosya").click();
+  if (d === "kaydet") {
+    const a = antetiBul(etkin.acik.belge);
+    const k = kabuk();
+    if (!a || !k) return;
+    const ad = window.prompt("Antet adı (Ayarlar → Antetlerim'de bu adla görünür):", "Büro anteti");
+    if (ad === null) return;
+    try {
+      await k.antetKaydet(ad.trim() || "Antet", a);
+      bildir("Antet büroya kaydedildi.");
+      antetMenusuDoldur();
+    } catch (e) {
+      bildir(`Antet kaydedilemedi: ${e instanceof Error ? e.message : e}`, "hata");
+    }
+    return;
+  }
+  const a = kayitliAntetler.find((x) => `k${x.id}` === d);
+  if (a) antetUygula(a);
+}
+
+async function antetDosyasi(f: File) {
+  if (!etkin) return;
+  try {
+    const s = etkin.acik.gorunum.sayfa;
+    antetUygula(await resimdenAntet(f, Math.max(50, s.genislik - s.sol - s.sag)));
+  } catch (e) {
+    bildir(`${e instanceof Error ? e.message : e}`, "hata");
+  }
 }
 
 async function dosyaAc(f: File) {
@@ -558,6 +646,7 @@ async function belgeAc(ad: string, bayt: Uint8Array, kimlik?: number, yerine?: S
     etkiniGizle();
     const s = sayfayiKur(a, { belge: a.belge, kok: ad.replace(/\.(udf|docx)$/i, ""), bicim: a.tur, gorunum: a.gorunum, kimlik, salt: a.imzali });
     sekmeEkle_(s, yerine ?? (bosYeniMi(etkin) ? etkin : null));
+    antetMenusuDoldur();
     const notlar: string[] = [];
     if (a.uyarilar.length) notlar.push("Korunamayan öğeler: " + a.uyarilar.join("; "));
     if (a.imzali) await imzaBilgisiGoster(s, bayt, notlar.join(" "));
@@ -719,6 +808,7 @@ const secici = {
   aralik: document.createElement("select"),
   olcek: document.createElement("select"),
   tablo: document.createElement("select"),
+  antet: document.createElement("select"),
   farkli: document.createElement("select"),
 };
 
@@ -766,12 +856,22 @@ function seciciKur(c: HTMLElement) {
     tablo.value = "";
     if (is) calistir(is[2]);
   };
+  const antet = secici.antet;
+  antet.title = "Antet: sayfanın üstündeki büro resmi (UYAP'taki gibi üst bilgide)";
+  antet.onchange = () => {
+    const d = antet.value;
+    antet.value = "";
+    if (d) antetSecildi(d);
+  };
+  // Büro antetleri değişmiş olabilir: menü açılmadan önce tazelenir
+  antet.addEventListener("pointerenter", () => antetMenusuDoldur());
+  antet.addEventListener("focus", () => antetMenusuDoldur());
   const olcek = secici.olcek;
   for (const [d, ad] of OLCEKLER) olcek.append(new Option(ad, d));
   olcek.value = olcekSecimi;
   olcek.classList.add("olcek");
   olcek.onchange = () => olcekSec(olcek.value);
-  for (const el of [farkli, aile, boyut, renk, aralik, tablo, olcek]) {
+  for (const el of [farkli, aile, boyut, renk, aralik, tablo, antet, olcek]) {
     el.classList.add("secici");
     c.append(el);
   }
@@ -804,6 +904,17 @@ function cubuguKur() {
     girdi.value = ""; // aynı dosya yeniden seçilebilsin
   };
   c.append(girdi);
+  const antetGirdi = document.createElement("input");
+  antetGirdi.type = "file";
+  antetGirdi.id = "antet-dosya";
+  antetGirdi.accept = "image/png,image/jpeg,image/gif,image/bmp,image/webp";
+  antetGirdi.hidden = true;
+  antetGirdi.onchange = () => {
+    const f = antetGirdi.files?.[0];
+    antetGirdi.value = "";
+    if (f) antetDosyasi(f);
+  };
+  c.append(antetGirdi);
   for (const d of DUGMELER) {
     if (d === "|") {
       c.append(Object.assign(document.createElement("span"), { className: "ayrac" }));
@@ -898,6 +1009,7 @@ void setBlockType; // ileride başlık stilleri
 await init();
 cubuguKur();
 cubuguGuncelle();
+antetMenusuDoldur();
 boyutDegisti();
 // Masaüstü: Armonia Yazı açıkken çift tıklanan başka belge / kısayola yeniden basılması, yeni pencere yerine bu
 // pencereye devredilir (kabuk: tek_ornek.rs) ve yeni sekmede açılır

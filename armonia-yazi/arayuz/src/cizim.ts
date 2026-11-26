@@ -49,14 +49,24 @@ export function paragrafCiz(p: Paragraf, g: Extract<GBlok, { Paragraf: unknown }
       el.append(img);
       return;
     }
-    const span = document.createElement("span");
-    parcaStili(span, s);
+    const span = (yazi: string, sinif?: string) => {
+      const sp = document.createElement("span");
+      parcaStili(sp, s);
+      sp.textContent = yazi;
+      if (sinif) sp.classList.add(sinif);
+      el.append(sp);
+    };
     // Alan (ör. sayfa numarası): alt bilgide sayfa numarası gösterilir
     // Sekme: genişliğini sayfa.ts sekmeleriYerlestir duraklara göre verir
-    span.textContent = tur === "Sekme" ? "" : tur === "Alan" && sayfaNo ? sayfaNo : metin.replace(/\n/g, "");
-    if (tur === "Alan") span.classList.add("alan");
-    if (tur === "Sekme") span.classList.add("sekme");
-    el.append(span);
+    if (tur === "Sekme") span("", "sekme");
+    else if (tur === "Alan") span(sayfaNo ?? metin.replace(/\n/g, ""), "alan");
+    else {
+      // Metindeki ham "\t" de sekmedir (UYAP Tab'ı çoğu belgede böyle yazar; donustur.ts ile aynı)
+      metin.replace(/\n/g, "").split("\t").forEach((bolum, k) => {
+        if (k > 0) span("", "sekme");
+        if (bolum) span(bolum);
+      });
+    }
   });
   return el;
 }

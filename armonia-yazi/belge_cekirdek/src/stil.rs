@@ -162,7 +162,8 @@ impl ParagrafStili {
     /// Verilen konumdan (sol girintiye göre, pt) sonraki sekme durağı (udf_pdf.rs `_sonraki_durak`).
     pub fn sonraki_sekme(&self, x: f64) -> Sekme {
         if self.sekmeler.is_empty() {
-            return Sekme { konum: ((x / VARSAYILAN_SEKME).floor() + 1.0) * VARSAYILAN_SEKME, hiza: 0 };
+            // Açık duraklardaki gibi 0,01 pt pay: 71,99999 gibi yuvarlama artığı aynı durağa düşmesin
+            return Sekme { konum: (((x + 0.01) / VARSAYILAN_SEKME).floor() + 1.0) * VARSAYILAN_SEKME, hiza: 0 };
         }
         self.sekmeler
             .iter()

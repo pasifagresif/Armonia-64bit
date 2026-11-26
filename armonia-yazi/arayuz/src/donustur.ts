@@ -39,11 +39,14 @@ export function paragrafDugumu(p: Paragraf, g: Extract<GBlok, { Paragraf: unknow
     const stil = stiller[i];
     if (tur === "Metin" || tur === "Bosluk") {
       if (!metin) return;
-      const isaretler: Mark[] = [
-        sema.marks.udf.create({ etiket: tur === "Metin" ? "content" : "space", oz, ozgun: stil }),
-        ...bicimIsaretleri(stil),
-      ];
-      icerik.push(sema.text(metin, isaretler));
+      const udf = { etiket: tur === "Metin" ? "content" : "space", oz, ozgun: stil };
+      const isaretler: Mark[] = [sema.marks.udf.create(udf), ...bicimIsaretleri(stil)];
+      // Metindeki ham "\t" (UYAP Tab'ı çoğu belgede böyle yazar) sekme düğümü olur: yoksa tarayıcı onu kendi
+      // 8 boşluklu sekmesiyle çiziyor, UYAP'ta 72 pt duraklarına hizalı satırlar dağılıyordu (26.11.2026)
+      metin.split("\t").forEach((bolum, k) => {
+        if (k > 0) icerik.push(sema.nodes.sekme.create({ oz: [], metin: "\t", stil, gomulu: udf }, null, bicimIsaretleri(stil)));
+        if (bolum) icerik.push(sema.text(bolum, isaretler));
+      });
     } else {
       const dugum = tur === "Sekme" ? sema.nodes.sekme : tur === "Alan" ? sema.nodes.alan : sema.nodes.resim;
       // Atom düğümler de biçim işaretlerini taşır (alan metni, sekme genişliği yazı boyutuna göre)
@@ -148,17 +151,41 @@ function paragrafOzu(n: PMNode): Ozellikler {
 
 export function paragrafiCevir(n: PMNode): Paragraf {
   const parcalar: Parca[] = [];
+  // Her parçanın açılıştaki kaynağı (udf işaretinin ham `oz` dizisi; aynı nesne = aynı UDF parçası) ve yazılan
+  // biçimi: metne gömülü açılan sekmeler ("\t") yine aynı parçanın metnine birleştirilsin diye
+  const kaynak: ({ oz: unknown; yazilan: string } | null)[] = [];
+  const metinEkle = (etiket: string, metin: string, hamOz: Ozellikler, oz: Ozellikler) => {
+    const yazilan = JSON.stringify(oz);
+    const i = parcalar.length - 1;
+    const onceki = parcalar[i];
+    if (onceki && kaynak[i]?.oz === hamOz && kaynak[i]?.yazilan === yazilan
+      && (etiket === "space" ? "Bosluk" in onceki : "Metin" in onceki)) {
+      const ic = parcaIci(onceki);
+      parcalar[i] = etiket === "space" ? { Bosluk: { metin: ic.metin + metin, oz } } : { Metin: { metin: ic.metin + metin, oz } };
+      return;
+    }
+    parcalar.push(etiket === "space" ? { Bosluk: { metin, oz } } : { Metin: { metin, oz } });
+    kaynak.push({ oz: hamOz, yazilan });
+  };
   n.forEach((c) => {
     if (c.isText) {
       const udf = c.marks.find((m) => m.type.name === "udf");
-      const oz = bicimiIsle(udf?.attrs.oz ?? [], udf?.attrs.ozgun ?? null, c.marks);
-      const metin = c.text ?? "";
-      parcalar.push(udf?.attrs.etiket === "space" ? { Bosluk: { metin, oz } } : { Metin: { metin, oz } });
+      if (!udf) {
+        // Yeni yazılmış metin (açılışta yoktu): kendi parçası
+        parcalar.push({ Metin: { metin: c.text ?? "", oz: bicimiIsle([], null, c.marks) } });
+        kaynak.push(null);
+        return;
+      }
+      metinEkle(udf.attrs.etiket, c.text ?? "", udf.attrs.oz, bicimiIsle(udf.attrs.oz, udf.attrs.ozgun ?? null, c.marks));
+    } else if (c.type.name === "sekme" && c.attrs.gomulu) {
+      const g = c.attrs.gomulu as { etiket: string; oz: Ozellikler; ozgun: ParcaStili | null };
+      metinEkle(g.etiket, "\t", g.oz, bicimiIsle(g.oz, g.ozgun, c.marks));
     } else {
       const ic = { metin: c.attrs.metin as string, oz: c.attrs.oz as Ozellikler };
       if (c.type.name === "sekme") parcalar.push({ Sekme: ic });
       else if (c.type.name === "alan") parcalar.push({ Alan: ic });
       else if (c.type.name === "resim") parcalar.push({ Resim: ic });
+      while (kaynak.length < parcalar.length) kaynak.push(null);
     }
   });
   const satirSonu = n.attrs.satirSonuOz as SatirSonu | null;

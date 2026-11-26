@@ -63,9 +63,14 @@ function dekorlar(state: EditorState, k: Kirilma[]): DecorationSet {
 
 interface Durak { konum: number; hiza: number }
 
+/** Ekrandan okunan konumun yuvarlama payı (pt). Tarayıcı satır içi konumları 1/64 px'e yuvarlar, yakınlaştırma
+ * bunu büyütür: önceki sekmenin bittiği yer 72 yerine 71,98 okununca Tab aynı durağa (genişlik ~0) gidiyor,
+ * ardışık Tab ilerlemiyordu (26.11.2026). udf_pdf.rs / stil.rs genişlikleri hesapladığı için 0,01 yeter. */
+const PAY = 0.25;
+
 function sonrakiDurak(x: number, duraklar: Durak[]): Durak {
-  if (!duraklar.length) return { konum: (Math.floor(x / 72) + 1) * 72, hiza: 0 };
-  return duraklar.find((d) => d.konum > x + 0.01) ?? { konum: x + 5, hiza: 0 };
+  if (!duraklar.length) return { konum: (Math.floor((x + PAY) / 72) + 1) * 72, hiza: 0 };
+  return duraklar.find((d) => d.konum > x + PAY) ?? { konum: x + 5, hiza: 0 };
 }
 
 /** Sekmeden sonra, bir sonraki sekmeye (ya da paragraf sonuna) kadarki metnin genişliği (px). */

@@ -113,7 +113,10 @@ export const sema = new Schema({
       group: "inline",
       inline: true,
       atom: true,
-      attrs: { oz: { default: [] }, metin: { default: "\t" }, stil: { default: null } },
+      // gomulu: UYAP Tab'ı çoğu belgede <tab> öğesi değil, bir <content> parçasının metninde ham "\t" olarak
+      // yazar. Açılışta o "\t" sekmeye çevrilir; `gomulu` o parçanın udf işaretinin nitelikleridir (etiket, oz,
+      // ozgun) ve kaydederken sekme yine aynı parçanın metnine "\t" olarak birleştirilir (donustur.ts).
+      attrs: { oz: { default: [] }, metin: { default: "\t" }, stil: { default: null }, gomulu: { default: null } },
       toDOM(): DOMOutputSpec {
         // Genisligi sayfa.ts sekmeleriYerlestir duraklara gore verir
         return ["span", { class: "sekme", contenteditable: "false" }];
