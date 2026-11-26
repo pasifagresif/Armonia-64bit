@@ -70,6 +70,8 @@ pub fn kesinlesme_hesapla(teblig_tarihi: NaiveDate, sure_gun: i64, tatiller: &Ta
 
 /// Elle bağlanan mazbatada tebliğ tarihi girilmiş fiziki tebligatın hesaptaki PTT durumu ("teslim edildi" içerir).
 pub const MAZBATADAN_TESLIM: &str = "TESLİM EDİLDİ (mazbatadaki tarih)";
+/// Elle bağlanan mazbata "tebliğ edilemedi" döndü (kullanıcı işaretledi): PTT durumunun yerine geçer, "iade" içerir.
+pub const MAZBATADAN_IADE: &str = "İADE (mazbata tebliğ edilemedi, elle)";
 
 /// Borçluya bağlı bir ödeme emri tebligatı (`tebligat_barkod` satırının hesapta kullanılan alanları).
 #[derive(Clone, Debug, Default)]
@@ -508,7 +510,7 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
         .query(
             "SELECT tb.borclu_id, tb.birim_evrak_no, tb.evrak_aciklama, tb.evrak_tarihi, tb.evrak_gunu, tb.barkod,
                     tb.elektronik_tebligat, tb.ptt_durumu, tb.son_islem_tarihi, tb.son_islem_zamani::date, tb.teslim_sekli,
-                    tb.tebligat_mazbatasi_var, tb.tebligat_mazbatasi_aciklama, tb.dosya_id, mb.teblig_tarihi
+                    tb.tebligat_mazbatasi_var, tb.tebligat_mazbatasi_aciklama, tb.dosya_id, mb.teblig_tarihi, COALESCE(mb.iade, false)
                FROM tebligat_barkod tb
                LEFT JOIN tebligat_mazbata_bagi mb ON mb.dosya_id = tb.dosya_id AND mb.tebligat_evrak_no = tb.birim_evrak_no
               WHERE tb.tebligat_turu = ANY($2) AND ($1::bigint IS NULL OR tb.dosya_id = $1)
@@ -545,8 +547,17 @@ pub fn durumlari_guncelle<C: GenericClient>(c: &mut C, dosya: Option<i64>, bugun
             tebligat_mazbatasi_var: s.get(11),
             tebligat_mazbatasi_aciklama: s.get(12),
         };
+        // Elle bağlanan mazbata iade döndü (kullanıcı işaretledi): tebligat İade; PTT'nin "teslim edildi"si ve günü geçersiz,
+        // kesinleşme başlamaz. Girilmişse tarih iade günüdür (iade dönen tebligatın tebliğ tarihi olmaz).
+        if s.get::<_, bool>(15) && !oe.elektronik_tebligat {
+            let t = s.get::<_, Option<NaiveDate>>(14);
+            oe.ptt_durumu = MAZBATADAN_IADE.into();
+            oe.son_islem_gunu = t;
+            oe.son_islem_tarihi = t.map(|t| t.format("%d/%m/%Y").to_string()).unwrap_or_default();
+            oe.teslim_sekli = "Mazbata: tebliğ edilemedi (elle)".into();
+        }
         // Elle bağlanan mazbatadaki tebliğ günü (kullanıcı girdi): PTT'nin bilgisi yerine geçer (eski barkod PTT'de silinmiş).
-        if let Some(t) = s.get::<_, Option<NaiveDate>>(14).filter(|_| !oe.elektronik_tebligat) {
+        else if let Some(t) = s.get::<_, Option<NaiveDate>>(14).filter(|_| !oe.elektronik_tebligat) {
             oe.ptt_durumu = MAZBATADAN_TESLIM.into();
             oe.son_islem_gunu = Some(t);
             oe.son_islem_tarihi = t.format("%d/%m/%Y").to_string();
@@ -1031,6 +1042,16 @@ pub(crate) fn veritabani_senaryosu(c: &mut postgres::Client) {
     crate::icra_api::mazbata_bagla_tarihli(c, dv, 21, Some(22), Some(g(2026, 10, 8)), bugun).unwrap();
     let k = kes(c, cem);
     assert!(k.0 == "kesinlesti" && k.1.is_some_and(|t| t > g(2026, 10, 8) && t < g(2026, 10, 25)), "{k:?}");
+    // 26.11.2026: mazbata iade döndü (tebliğ tarihi yok) → tebligat İade, kesinleşme başlamaz; tarih iade günüdür.
+    let teb_durum = |c: &mut postgres::Client, b: i64| -> (String, Option<NaiveDate>) {
+        c.query_one("SELECT tebligat_durumu, tebligat_durum_tarihi FROM dosya_taraf WHERE id = $1", &[&b]).map(|r| (r.get(0), r.get(1))).unwrap()
+    };
+    crate::icra_api::mazbata_bagla_sonuclu(c, dv, 21, Some(22), None, true, bugun).unwrap();
+    assert_eq!(teb_durum(c, cem), ("iade".into(), None), "iade: tebliğ günü yok");
+    assert_eq!(kes(c, cem), ("kesinlesme_bekliyor".into(), None), "iade dönen tebligatla kesinleşme başlamaz");
+    crate::icra_api::mazbata_bagla_sonuclu(c, dv, 21, Some(22), Some(g(2026, 10, 9)), true, bugun).unwrap();
+    assert_eq!(teb_durum(c, cem), ("iade".into(), Some(g(2026, 10, 9))), "girilen tarih iade günü");
+    assert!(crate::icra_api::mazbata_bagla_sonuclu(c, dv, 21, Some(22), Some(g(2026, 12, 1)), true, bugun).unwrap_err().contains("İade tarihi"));
     // Bağ kaldırılınca bekliyor; UYAP'ta kesinleşmiş görülünce Kesinleşti (gün: görüldüğü gün), görülmeyince geri döner.
     crate::icra_api::mazbata_bagla(c, dv, 21, None, bugun).unwrap();
     assert_eq!(kes(c, cem).0, "kesinlesme_bekliyor");

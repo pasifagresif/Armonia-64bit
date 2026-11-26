@@ -2015,7 +2015,8 @@
                     m.aciklama ? e('div', { sinif: 'alt', metin: m.aciklama }) : null,
                     e('div', { sinif: 'alt', stil: 'margin-top:4px' }, m.elle_tebligat
                         ? ['Elle bağlı: ', e('b', { metin: bagli ? tebligatEtiketi(bagli) : 'evrak ' + m.elle_tebligat }),
-                           m.teblig_tarihi ? ' · mazbatadaki tebliğ tarihi ' + m.teblig_tarihi : '']
+                           m.iade ? ' · iade döndü (tebliğ edilemedi)' + (m.teblig_tarihi ? ' ' + m.teblig_tarihi : '')
+                               : (m.teblig_tarihi ? ' · mazbatadaki tebliğ tarihi ' + m.teblig_tarihi : '')]
                         : ['Elle bağ yok'])
                 ]);
                 kart.addEventListener('contextmenu', function(ev) { mazbataTebligatMenusu(ev, id, m, fiziki); });
@@ -2063,42 +2064,56 @@
         const liste = uygun.slice().sort(function(a, b) { return puan(b) - puan(a); });
         return { liste: liste, onerilen: liste.length && puan(liste[0]) >= 1e8 ? liste[0] : null, elenen: fiziki.length - uygun.length };
     }
-    // Tebliğ günü PTT'de olmayan tebligata bağlarken mazbatadaki tebliğ tarihi sorulur (boş bırakılabilir).
+    // Tebliğ günü PTT'de olmayan tebligata bağlarken mazbatanın sonucu sorulur: tebliğ edildiyse mazbatadaki tebliğ tarihi
+    // (boş bırakılabilir); iade döndüyse tarih istenmez (26.11.2026, kullanıcı bulgusu: iade dönen tebligatın tebliğ tarihi
+    // olmaz). tamam(gun, iade). İade işaretli bağda tebligat İade sayılır, kesinleşme başlamaz (icra_durum.rs).
     function tebligTarihiSor(t, m, tamam) {
-        if (tebligGunuVar(t)) { tamam(null); return; }
-        const ortu = e('div', { sinif: 'i-ortu', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mazbatadaki tebliğ tarihi' });
+        if (tebligGunuVar(t)) { tamam(null, false); return; }
+        const ortu = e('div', { sinif: 'i-ortu', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mazbatanın sonucu' });
         const kapat = function() { ortu.remove(); };
         ortu.addEventListener('mousedown', function(ev) { if (ev.target === ortu) kapat(); });
         const bugun = new Date();
         const ust = isoGun(m && m.evrak_tarihi) || [bugun.getFullYear(), String(bugun.getMonth() + 1).padStart(2, '0'), String(bugun.getDate()).padStart(2, '0')].join('-');
         const tarih = e('input', { type: 'date', 'aria-label': 'Mazbatadaki tebliğ tarihi', min: isoGun(t.evrak_tarihi) || null, max: ust,
-                                   value: isoGun(m && m.teblig_tarihi) || null });
-        const bagla = function(deger) { kapat(); tamam(deger); };
-        ortu.appendChild(e('div', { sinif: 'i-pencere', stil: 'width:min(480px,calc(100vw - 24px))' }, [
-            e('div', { stil: 'font-weight:700;font-size:15px', metin: 'Mazbatadaki tebliğ tarihi' }),
-            e('div', { sinif: 'alt', stil: 'margin:6px 0 8px', metin: 'Bu tebligatın tebliğ günü PTT\'de yok (eski barkodlar PTT\'nin sisteminden silinir). Mazbatada yazan tebliğ tarihini girerseniz kesinleşme bu günden hesaplanır.' }),
+                                   value: (m && !m.iade && isoGun(m.teblig_tarihi)) || null });
+        const bagla = function(deger, iade) { kapat(); tamam(deger, !!iade); };
+        ortu.appendChild(e('div', { sinif: 'i-pencere', stil: 'width:min(500px,calc(100vw - 24px))' }, [
+            e('div', { stil: 'font-weight:700;font-size:15px', metin: 'Mazbatanın sonucu' }),
+            e('div', { sinif: 'alt', stil: 'margin:6px 0 8px', metin: 'Bu tebligatın tebliğ günü PTT\'de yok (eski barkodlar PTT\'nin sisteminden silinir).' }),
             e('div', { stil: 'font-weight:600', metin: tebligatEtiketi(t) }),
-            e('label', { stil: 'display:flex;align-items:center;gap:8px;margin:12px 0' }, ['Tebliğ tarihi', tarih]),
+            e('div', { stil: 'font-weight:700;margin-top:14px', metin: 'Tebliğ edildi' }),
+            e('div', { sinif: 'alt', metin: 'Mazbatada yazan tebliğ tarihini girerseniz kesinleşme bu günden hesaplanır.' }),
+            e('label', { stil: 'display:flex;align-items:center;gap:8px;margin:8px 0' }, ['Tebliğ tarihi', tarih]),
             e('div', { stil: 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap' }, [
-                e('button', { sinif: 'i-d', type: 'button', metin: 'Vazgeç', onclick: kapat }),
-                e('button', { sinif: 'i-d', type: 'button', metin: 'Tarihsiz bağla', title: 'Bağ kurulur; kesinleşme için tebliğ günü yine bilinmez', onclick: function() { bagla(null); } }),
-                e('button', { sinif: 'i-d ana', type: 'button', metin: 'Bağla', onclick: function() {
+                e('button', { sinif: 'i-d', type: 'button', metin: 'Tarihsiz bağla', title: 'Bağ kurulur; kesinleşme için tebliğ günü yine bilinmez', onclick: function() { bagla(null, false); } }),
+                e('button', { sinif: 'i-d ana', type: 'button', metin: 'Tebliğ edildi olarak bağla', onclick: function() {
                     if (!tarih.value) { bildir('Tebliğ tarihini girin ya da "Tarihsiz bağla"yı seçin.'); return; }
-                    bagla(tarih.value);
-                } })])
+                    bagla(tarih.value, false);
+                } })]),
+            e('div', { stil: 'font-weight:700;margin-top:14px', metin: 'İade döndü' }),
+            e('div', { sinif: 'alt', metin: 'Tebliğ tarihi gerekmez. Tebligat İade sayılır; kesinleşme başlamaz, "ödeme emri iade dönen" işlemlerinde görünür.' }),
+            e('div', { stil: 'display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;margin-top:8px' }, [
+                e('button', { sinif: 'i-d', type: 'button', metin: 'Vazgeç', onclick: kapat }),
+                e('button', { sinif: 'i-d tehlike', type: 'button', metin: 'İade döndü (tebliğ edilemedi)', onclick: function() { bagla(null, true); } })])
         ]));
         kok.appendChild(ortu);
         tarih.focus();
     }
-    async function mazbataBagla(dosya, tebligat, mazbata, tebligTarihi) {
+    async function mazbataBagla(dosya, tebligat, mazbata, tebligTarihi, iade) {
         try {
-            await istek('mazbata_bagla', { dosya: dosya, tebligat: tebligat, mazbata: mazbata, teblig_tarihi: tebligTarihi || null });
-            bildir(mazbata ? 'Mazbata tebligata bağlandı; tebliğ ve kesinleşme yeniden hesaplandı.' : 'Elle bağ kaldırıldı; otomatik eşleşmeye dönüldü.');
+            await istek('mazbata_bagla', { dosya: dosya, tebligat: tebligat, mazbata: mazbata, teblig_tarihi: tebligTarihi || null, iade: !!iade });
+            bildir(!mazbata ? 'Elle bağ kaldırıldı; otomatik eşleşmeye dönüldü.'
+                : iade ? 'Mazbata bağlandı: iade (tebliğ edilemedi); tebliğ durumu yeniden hesaplandı.'
+                : 'Mazbata tebligata bağlandı; tebliğ ve kesinleşme yeniden hesaplandı.');
             seciliyiTazele();
         } catch (x) { bildir(x.message); }
     }
     function tarihleBagla(dosya, t, m) {
-        tebligTarihiSor(t, m, function(gun) { mazbataBagla(dosya, t.evrak_no, m.evrak_no, gun); });
+        tebligTarihiSor(t, m, function(gun, iade) { mazbataBagla(dosya, t.evrak_no, m.evrak_no, gun, iade); });
+    }
+    function bagSonucuMetni(m) {
+        return m.iade ? 'Mazbata sonucunu değiştir (iade döndü' + (m.teblig_tarihi ? ' ' + m.teblig_tarihi : '') + ')'
+            : m.teblig_tarihi ? 'Tebliğ tarihini değiştir (' + m.teblig_tarihi + ')' : 'Mazbatanın sonucunu / tebliğ tarihini gir';
     }
     function sagMenu(ev, gruplar) {
         if (!window.__uyapSagMenuAc) return;
@@ -2119,8 +2134,7 @@
         if (t.mazbata_elle) {
             const bagli = mazbatalar.find(function(m) { return m.elle_tebligat === t.evrak_no; });
             const g = [['Elle bağı kaldır', function() { mazbataBagla(dosya, t.evrak_no, null); }]];
-            if (bagli && !tebligGunuVar(t)) g.unshift([(bagli.teblig_tarihi ? 'Tebliğ tarihini değiştir (' + bagli.teblig_tarihi + ')' : 'Mazbatadaki tebliğ tarihini gir'),
-                function() { tarihleBagla(dosya, t, bagli); }]);
+            if (bagli && !tebligGunuVar(t)) g.unshift([bagSonucuMetni(bagli), function() { tarihleBagla(dosya, t, bagli); }]);
             gruplar.push(g);
         }
         sagMenu(ev, gruplar);
@@ -2135,8 +2149,7 @@
         if (m.elle_tebligat) {
             const bagli = fiziki.find(function(t) { return t.evrak_no === m.elle_tebligat; });
             const g = [['Elle bağı kaldır', function() { mazbataBagla(dosya, m.elle_tebligat, null); }]];
-            if (bagli && !tebligGunuVar(bagli)) g.unshift([(m.teblig_tarihi ? 'Tebliğ tarihini değiştir (' + m.teblig_tarihi + ')' : 'Mazbatadaki tebliğ tarihini gir'),
-                function() { tarihleBagla(dosya, bagli, m); }]);
+            if (bagli && !tebligGunuVar(bagli)) g.unshift([bagSonucuMetni(m), function() { tarihleBagla(dosya, bagli, m); }]);
             gruplar.push(g);
         }
         sagMenu(ev, gruplar);

@@ -746,7 +746,8 @@ pub fn dosya_ayrintisi<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Option
     let turler: Vec<String> = BAGLANABILIR_MAZBATALAR.iter().map(|t| t.to_string()).collect();
     let mazbatalar: Vec<Value> = c
         .query(
-            "SELECT e.birim_evrak_no, e.evrak_turu, e.aciklama, to_char(e.evrak_tarihi, 'DD/MM/YYYY'), to_char(mb.teblig_tarihi, 'DD/MM/YYYY')
+            "SELECT e.birim_evrak_no, e.evrak_turu, e.aciklama, to_char(e.evrak_tarihi, 'DD/MM/YYYY'), to_char(mb.teblig_tarihi, 'DD/MM/YYYY'),
+                    COALESCE(mb.iade, false)
                FROM evrak e LEFT JOIN tebligat_mazbata_bagi mb ON mb.dosya_id = e.dosya_id AND mb.mazbata_evrak_no = e.birim_evrak_no
               WHERE e.dosya_id = $1 AND e.evrak_turu = ANY($2) ORDER BY e.evrak_tarihi DESC NULLS LAST, e.birim_evrak_no DESC",
             &[&dosya, &turler],
@@ -757,7 +758,7 @@ pub fn dosya_ayrintisi<C: GenericClient>(c: &mut C, dosya: i64) -> Result<Option
             let no: i32 = s.get(0);
             json!({"evrak_no": no, "tur": s.get::<_, String>(1), "aciklama": s.get::<_, String>(2),
                    "evrak_tarihi": s.get::<_, Option<String>>(3), "elle_tebligat": elle.get(&no),
-                   "teblig_tarihi": s.get::<_, Option<String>>(4)})
+                   "teblig_tarihi": s.get::<_, Option<String>>(4), "iade": s.get::<_, bool>(5)})
         })
         .collect();
     let elle_tebligatlar: std::collections::HashSet<i32> = elle.values().copied().collect();
@@ -1279,8 +1280,22 @@ pub fn mazbata_bagla_tarihli<C: GenericClient>(
     teblig_tarihi: Option<NaiveDate>,
     bugun: NaiveDate,
 ) -> Result<Value, String> {
+    mazbata_bagla_sonuclu(c, dosya, tebligat, mazbata, teblig_tarihi, false, bugun)
+}
+
+/// [`mazbata_bagla_tarihli`] + mazbatanın sonucu: `iade` = mazbata "tebliğ edilemedi" döndü (26.11.2026). Tebligat İade
+/// sayılır, kesinleşme başlamaz; `tarih` o zaman isteğe bağlı iade günüdür (iade dönen tebligatın tebliğ tarihi olmaz).
+pub fn mazbata_bagla_sonuclu<C: GenericClient>(
+    c: &mut C,
+    dosya: i64,
+    tebligat: i32,
+    mazbata: Option<i32>,
+    teblig_tarihi: Option<NaiveDate>,
+    iade: bool,
+    bugun: NaiveDate,
+) -> Result<Value, String> {
     if teblig_tarihi.is_some_and(|t| t > bugun) {
-        return Err("Tebliğ tarihi bugünden sonra olamaz.".into());
+        return Err(if iade { "İade tarihi bugünden sonra olamaz." } else { "Tebliğ tarihi bugünden sonra olamaz." }.into());
     }
     let fiziki: Option<bool> = c
         .query_opt("SELECT elektronik_tebligat FROM tebligat_barkod WHERE dosya_id = $1 AND birim_evrak_no = $2", &[&dosya, &tebligat])
@@ -1304,8 +1319,8 @@ pub fn mazbata_bagla_tarihli<C: GenericClient>(
         }
         tx.execute("DELETE FROM tebligat_mazbata_bagi WHERE dosya_id = $1 AND mazbata_evrak_no = $2", &[&dosya, &mz]).map_err(hata)?;
         tx.execute(
-            "INSERT INTO tebligat_mazbata_bagi (dosya_id, tebligat_evrak_no, mazbata_evrak_no, teblig_tarihi) VALUES ($1, $2, $3, $4)",
-            &[&dosya, &tebligat, &mz, &teblig_tarihi],
+            "INSERT INTO tebligat_mazbata_bagi (dosya_id, tebligat_evrak_no, mazbata_evrak_no, teblig_tarihi, iade) VALUES ($1, $2, $3, $4, $5)",
+            &[&dosya, &tebligat, &mz, &teblig_tarihi, &iade],
         )
         .map_err(hata)?;
     }
@@ -1687,8 +1702,34 @@ fn dagit(c: &mut postgres::Client, yontem: &str, uc: &str, q: &HashMap<String, S
         }
         ("POST", "mazbata_bagla") => {
             let no = |a: &str| g.get(a).and_then(Value::as_i64).and_then(|n| i32::try_from(n).ok()).filter(|n| *n > 0);
-            mazbata_bagla_tarihli(c, tam(g, "dosya")?, no("tebligat").ok_or("Tebligat seçilmedi.")?, no("mazbata"),
-                                  gun_coz(g.get("teblig_tarihi").unwrap_or(&Value::Null))?, bugun)?
+            mazbata_bagla_sonuclu(c, tam(g, "dosya")?, no("tebligat").ok_or("Tebligat seçilmedi.")?, no("mazbata"),
+                                  gun_coz(g.get("teblig_tarihi").unwrap_or(&Value::Null))?, evet("iade"), bugun)?
+        }
+        // IBAN kayıtları (Ayarlar penceresi ve "Parayı iste"; bkz. iban.rs)
+        ("GET", "ibanlar") => crate::iban::liste(c)?,
+        ("POST", "iban_ekle") => crate::iban::ekle(c, &metin("iban"), &metin("etiket"), evet("varsayilan"))?,
+        ("POST", "iban_sil") => {
+            crate::iban::sil(c, tam(g, "id")?)?;
+            Value::Null
+        }
+        ("POST", "iban_varsayilan") => {
+            crate::iban::varsayilan_yap(c, tam(g, "id")?)?;
+            Value::Null
+        }
+        ("POST", "iban_etiket") => {
+            crate::iban::etiket_ata(c, tam(g, "id")?, &metin("etiket"))?;
+            Value::Null
+        }
+        ("GET", "alacakli_ibanlar") => crate::iban::alacakli_liste(c)?,
+        ("GET", "alacakli_iban") => crate::iban::alacakli_oku(
+            c,
+            q.get("birim_id").map(String::as_str).unwrap_or(""),
+            q.get("dosya_no").map(String::as_str).unwrap_or(""),
+        )?,
+        ("POST", "alacakli_iban") => crate::iban::alacakli_kaydet(c, &metin("birim_id"), &metin("dosya_no"), &metin("birim_adi"), &metin("iban"))?,
+        ("POST", "alacakli_iban_sil") => {
+            crate::iban::alacakli_sil(c, &metin("birim_id"), &metin("dosya_no"))?;
+            Value::Null
         }
         ("POST", "itiraz") => {
             itiraz_ata(c, tam(g, "bag")?, evet("edildi"), gun_coz(&g["tarih"])?, bugun)?;

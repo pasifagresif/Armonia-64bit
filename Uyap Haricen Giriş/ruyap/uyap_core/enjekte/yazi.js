@@ -1167,17 +1167,53 @@
         kok.style.display = 'none';
         gorevGuncelle();
     }
-    // Kaydedilmemiş değişiklik varsa başlıkta sorulur (tarayıcı uyarı penceresi açılmaz).
+    // Kaydedilmemiş değişiklik varsa editörün üstünde onay penceresi açılır (tarayıcı uyarı penceresi değil). Eskiden
+    // başlık çubuğunda silik bir yazıydı; kullanıcı fark etmeyip "Kapat çalışmıyor" sanıyordu (26.11.2026).
+    let kapatSorusu = null;
     function kapat(zorla) {
         if (!kok) return;
         if (!zorla && degisti()) {
-            baslikAd.dataset.soru = '1';
-            const evet = el('button', 'ana', 'Yine de kapat'), hayir = el('button', null, 'Vazgeç');
-            evet.addEventListener('click', function() { delete baslikAd.dataset.soru; kapat(true); });
-            hayir.addEventListener('click', function() { delete baslikAd.dataset.soru; sonBaslik = '\u0000'; baslikGuncelle(); });
-            baslikAd.replaceChildren(el('span', 'cu-yz-uyari', 'Kaydedilmemiş değişiklik var. '), evet, hayir);
+            if (kapatSorusu) { kapatSorusu.odak(); return; }
+            if (durum !== 'acik') ac();
+            const k = kutuAc('Kaydedilmemiş değişiklikler var');
+            const ad = belgeAdi();
+            k.kutu.appendChild(el('div', 'cu-yz-satir', (ad ? '"' + ad + '" belgesinde' : 'Belgede') +
+                ' büroya kaydedilmemiş değişiklikler var. Kaydetmeden kapatırsanız bu değişiklikler kaybolur.'));
+            const not = el('div', 'cu-yz-not', '');
+            k.kutu.appendChild(not);
+            const alt = el('div', 'cu-yz-alt');
+            const vazgec = el('button', null, 'Vazgeç');
+            const kaydetmeden = el('button', null, 'Kaydetmeden kapat');
+            kaydetmeden.style.color = '#b84444';
+            const kaydet = el('button', 'ana', kayit ? 'Büroya kaydet ve kapat' : 'Büroya kaydet…');
+            const bitir = function() { kapatSorusu = null; k.kapa(); };
+            vazgec.addEventListener('click', bitir);
+            kaydetmeden.addEventListener('click', function() { bitir(); kapat(true); });
+            kaydet.addEventListener('click', async function() {
+                if (!kayit) { bitir(); kaydetPenceresi(false); return; }   // ilk kayıt: ad / dosya sorulur
+                kaydet.disabled = kaydetmeden.disabled = vazgec.disabled = true;
+                not.textContent = 'Kaydediliyor…';
+                try {
+                    const v = await kaydedilecek();
+                    await buroyaYaz(v.f, { imzali: v.imzali });
+                    bitir();
+                    kapat(true);
+                } catch (x) {
+                    kaydet.disabled = kaydetmeden.disabled = vazgec.disabled = false;
+                    not.textContent = x && x.kod === 'CAKISMA' ? x.message : 'Kaydedilemedi: ' + (x && x.message || x);
+                }
+            });
+            alt.append(vazgec, kaydetmeden, kaydet);
+            k.kutu.appendChild(alt);
+            // Dış tık / Esc kutuAc'ta pencereyi kapatır: soru da temizlensin.
+            const kat = k.kutu.parentElement;
+            kat.addEventListener('pointerdown', function(e) { if (e.target === kat) kapatSorusu = null; });
+            kat.addEventListener('keydown', function(e) { if (e.key === 'Escape') kapatSorusu = null; });
+            kapatSorusu = { odak: function() { try { vazgec.focus(); } catch (x) {} } };
+            setTimeout(kapatSorusu.odak, 0);
             return;
         }
+        kapatSorusu = null;
         clearInterval(izci);
         kok.remove();
         kok = cerceve = baslikAd = araclar = null;

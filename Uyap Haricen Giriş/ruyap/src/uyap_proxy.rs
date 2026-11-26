@@ -5069,17 +5069,29 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         }
         return hamFetchFn(url, Object.assign({ credentials: 'include', cache: 'no-store' }, init || {}));
     }
+    // UYAP aynı oturumda süren başka bir sorgu varken dizi yerine {type:'error', message:'Eş zamanlı olarak birden fazla
+    // sorgulama yapamazsınız!'} döner (canlı 26.11.2026: "Parayı iste" borçlu listesinde "borçlu bulunamadı" sanıldı).
+    // O yanıtta 4 sn arayla 3 kez daha denenir.
+    function uyapHataMesaji(j) {
+        if (!j || Array.isArray(j) || typeof j !== 'object') return '';
+        return String(j.message || j.errorMessage || j.mesaj || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    }
     async function uyapTaze(uc, govde) {
-        const r = await hamFetch('/' + uc, { method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
-            body: JSON.stringify(govde) });
-        if (!r.ok) throw new Error('UYAP ' + uc + ' HTTP ' + r.status);
-        return r.json();
+        for (let deneme = 1; ; deneme++) {
+            const r = await hamFetch('/' + uc, { method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
+                body: JSON.stringify(govde) });
+            if (!r.ok) throw new Error('UYAP ' + uc + ' HTTP ' + r.status);
+            const j = await r.json();
+            if (!/eş zamanlı|es zamanli/i.test(uyapHataMesaji(j)) || deneme >= 4) return j;
+            await new Promise(function(c) { setTimeout(c, 4000); });
+        }
     }
     async function borcluListesi(d) {
         const j = await uyapTaze('dosya_borclu_list.ajx', { dosyaId: d.dosyaId });
-        return (Array.isArray(j) ? j : []).filter(function(b) { return b && b.kisiKurumId; }).map(function(b) {
-            const k = b.kisiTumDVO || {}, kr = b.kurumTumDVO || {};
+        if (!Array.isArray(j)) throw new Error(uyapHataMesaji(j) || 'UYAP borçlu listesini beklenmeyen biçimde döndürdü.');
+        return j.filter(function(b) { return b && b.kisiKurumId; }).map(function(b) {
+            const k = b.kisiTumDVO || {}, kr = b.kurumDVO || b.kurumTumDVO || {};
             const ad = [k.adi, k.soyadi].filter(Boolean).join(' ').trim() || kr.kurumAdi || kr.unvan || k.unvan || 'Borçlu';
             return { kisiKurumId: b.kisiKurumId, ad: String(ad).replace(/\s+/g, ' ').trim() };
         });
@@ -5173,14 +5185,23 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
     }
     // Genel talep evrakı: hazırla ("Talep Evrakı Oluştur") → e-imzala → "Genel Talebi" olarak ekle ve gönder.
     async function talepEvrakiGonder(d, borclu, talepBilgileri, adEki, ilerle) {
-        ilerle('Talep evrakı hazırlanıyor…');
-        const hr = await hamFetch('/getIcraTalepEvrakHazirla.uyap', { method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
-            body: JSON.stringify({ dosyaId: d.dosyaId, filename: d.dosyaNo, kisiKurumId: borclu.kisiKurumId,
-                                   talepBilgileri: talepBilgileri }) });
-        const udf = new Uint8Array(await hr.arrayBuffer());
-        const bas = new TextDecoder().decode(udf.slice(0, 4000));
-        const zip = udf[0] === 0x50 && udf[1] === 0x4b;
+        // UYAP aynı oturumda süren başka bir sorgu varken "Eş zamanlı olarak birden fazla sorgulama yapamazsınız" döner
+        // (canlı 26.11.2026: 8 sn sonra ikinci deneme geçti). O yanıtta birkaç kez bekleyip yeniden denenir.
+        const eszamanli = function(m) { return /eş zamanlı|es zamanli/i.test(String(m || '')); };
+        const bekle = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };
+        let hr, udf, bas, zip;
+        for (let deneme = 1; ; deneme++) {
+            ilerle(deneme === 1 ? 'Talep evrakı hazırlanıyor…' : 'UYAP meşgul; talep evrakı yeniden hazırlanıyor (' + deneme + '. deneme)…');
+            hr = await hamFetch('/getIcraTalepEvrakHazirla.uyap', { method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*' },
+                body: JSON.stringify({ dosyaId: d.dosyaId, filename: d.dosyaNo, kisiKurumId: borclu.kisiKurumId,
+                                       talepBilgileri: talepBilgileri }) });
+            udf = new Uint8Array(await hr.arrayBuffer());
+            bas = new TextDecoder().decode(udf.slice(0, 4000));
+            zip = udf[0] === 0x50 && udf[1] === 0x4b;
+            if (zip || !eszamanli(bas) || deneme >= 4) break;
+            await bekle(4000);
+        }
         if (!hr.ok || !(zip || (bas.indexOf('<template') >= 0))) {
             throw new Error('UYAP talep evrakını hazırlamadı (HTTP ' + hr.status + '): ' + bas.slice(0, 160));
         }
@@ -5217,9 +5238,16 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         fd.append('tutar', '0');
         fd.append('talepGrupId', T121_GRUP_ID);
         fd.append('talepBilgileri', talepBilgileri);
-        const gr = await hamFetch('/avukatIcraTalepEvrakiGonder.ajx', { method: 'POST', body: fd });
-        let sonuc = null;
-        try { sonuc = await gr.json(); } catch (e) {}
+        let gr, sonuc = null;
+        for (let deneme = 1; ; deneme++) {
+            gr = await hamFetch('/avukatIcraTalepEvrakiGonder.ajx', { method: 'POST', body: fd });
+            sonuc = null;
+            try { sonuc = await gr.json(); } catch (e) {}
+            // Yalnız "eş zamanlı sorgulama" reddinde yeniden gönderilir: UYAP o istekte hiçbir şey işlememiştir.
+            if ((sonuc && sonuc.type === 'success') || !eszamanli(sonuc && sonuc.message) || deneme >= 4) break;
+            ilerle('UYAP meşgul; yeniden gönderiliyor (' + (deneme + 1) + '. deneme)…');
+            await bekle(4000);
+        }
         if (!sonuc || sonuc.type !== 'success') {
             throw new Error('UYAP gönderimi kabul etmedi: '
                 + String((sonuc && sonuc.message) || ('HTTP ' + gr.status)).replace(/<[^>]+>/g, ' ').trim());
@@ -5338,6 +5366,206 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         const tarih = String(m.evrak.onaylandigiTarih || '').slice(0, 10);
         return [[['Tebligata bağla… · ' + String(m.evrak.tur).trim() + (tarih ? ' ' + tarih : ''), function() { mazbataBagPenceresi(d, m.evrak); }]]];
     }
+    // ── "Parayı iste": tahsilat makbuzuna sağ tık → Borçlu Tarafından Yapılan Ödemelerin Hesaba Aktarılması (26.11.2026) ──
+    // UYAP'ın Borçlu > Talep Gönder > Genel Talepler ekranında canlı yakalandı: talepKodu 14, grupKodu 2,
+    // className AvukatTalepGenelOdemeAktarDVO; talep alanları hesapKimeAit (V/A), hesapKimeAitText, ibanNo ("TR…").
+    // Hazırla → e-imzala → gönder akışı 121 talebiyle ortak (talepEvrakiGonder). IBAN'lar büro veritabanında
+    // (iban.rs): vekil IBAN'ları Ayarlar'dan, alacaklı IBAN'ı dosya başına.
+    function tahsilatDugumu(h) {
+        const kart = h.closest('.dosya-sorgula-popup');
+        const A = window.__uyapEvrakAgaci;
+        const tv = kart && A && kart.querySelector('.evrak-treeview');
+        if (!tv) return null;
+        let node = null;
+        if (h.closest('.evrak-treeview')) node = h.closest('.dx-treeview-node');
+        else if (goruntuleyiciKoku(h, kart)) node = tv.querySelector('.dx-treeview-node.dx-state-selected');
+        const koklar = node && A.veri(tv);
+        const g = koklar ? A.harita(koklar)[node.getAttribute('data-item-id')] : null;
+        const e = g ? g.x.evrak : null;
+        if (!e || !/tahsilat makbuzu/.test(kucukHarf(String(e.tur || '') + ' ' + String(e.aciklama || '')))) return null;
+        return { kart: kart, evrak: e };
+    }
+    function paraIsteMenusu(h) {
+        const m = tahsilatDugumu(h);
+        const d = m && window.__uyapKartVerisi ? window.__uyapKartVerisi(m.kart) : null;
+        if (!d || !d.dosyaId) return null;
+        const tarih = String(m.evrak.onaylandigiTarih || '').slice(0, 10);
+        return [[['Parayı iste · Tahsilat makbuzu' + (tarih ? ' ' + tarih : ''), null],
+                 ['Kayıtlı IBAN\'ıma…', function() { paraVekil(d); }],
+                 ['Alacaklı IBAN\'ına…', function() { paraAlacakli(d); }]]];
+    }
+    async function veriGet(uc) {
+        const r = await window.fetch('/__cu__/veri/' + uc, { cache: 'no-store', credentials: 'same-origin' });
+        let j = null;
+        try { j = await r.json(); } catch (e) {}
+        if (!j) throw new Error('Ofis bilgisayarından beklenmeyen yanıt (HTTP ' + r.status + '). Program güncel olmayabilir.');
+        if (j.ok === false || j.error) throw new Error(j.error || 'İşlem yapılamadı.');
+        return j.veri !== undefined ? j.veri : j;
+    }
+    function ibanGruplu(s) { return String(s || '').replace(/(.{4})/g, '$1 ').trim(); }
+    // iban.rs::duzelt ile aynı kural: "TR" + 24 rakam, mod-97.
+    function ibanDuzelt(ham) {
+        let s = String(ham || '').replace(/[\s-]/g, '').toUpperCase();
+        if (/^\d{24}$/.test(s)) s = 'TR' + s;
+        if (!/^TR\d{24}$/.test(s)) return null;
+        const d = s.slice(4) + '2927' + s.slice(2, 4);   // T=29, R=27
+        let k = 0;
+        for (let i = 0; i < d.length; i++) k = (k * 10 + (d.charCodeAt(i) - 48)) % 97;
+        return k === 1 ? s : null;
+    }
+    function paraMenu(baslik, maddeler) {
+        const konum = t121Konum;
+        sagMenuGoster(konum ? konum.x : innerWidth / 2, konum ? konum.y : innerHeight / 3, [[[baslik, null]].concat(maddeler)], true);
+    }
+    function paraHata(m) {
+        kur();
+        kutu.replaceChildren(el('div', 'font-size:14px;font-weight:700;', 'Parayı iste'),
+                             el('div', 'margin-top:8px;color:#fca5a5;word-break:break-word;', m),
+                             dugme('Kapat', 'rgba(255,255,255,0.15)', kapat));
+        ort.style.display = 'flex';
+    }
+    async function paraVekil(d) {
+        let l;
+        try { l = await veriGet('ibanlar'); } catch (e) { paraHata('IBAN\'lar okunamadı: ' + e.message); return; }
+        l = Array.isArray(l) ? l : [];
+        if (!l.length) { ibanGir(d, 'V'); return; }
+        paraMenu('Kayıtlı IBAN\'ıma', l.map(function(x) {
+            return [(x.etiket ? x.etiket + ' · ' : '') + x.gruplu + (x.varsayilan ? ' (varsayılan)' : ''), function() { paraBorclu(d, 'V', x.iban); }];
+        }).concat([['Yeni IBAN gireceğim…', function() { ibanGir(d, 'V'); }]]));
+    }
+    async function paraAlacakli(d) {
+        let k;
+        try { k = await veriGet('alacakli_iban?birim_id=' + encodeURIComponent(d.birimId || '') + '&dosya_no=' + encodeURIComponent(d.dosyaNo || '')); }
+        catch (e) { paraHata('Alacaklı IBAN\'ı okunamadı: ' + e.message); return; }
+        if (!k || !k.iban) { ibanGir(d, 'A'); return; }
+        paraMenu('Alacaklı IBAN\'ına', [['Dosyada kayıtlı IBAN · ' + k.gruplu, function() { paraBorclu(d, 'A', k.iban); }],
+                                         ['Başka IBAN…', function() { ibanGir(d, 'A'); }]]);
+    }
+    // Yeni IBAN girişi. Vekil: "IBAN'larıma kaydedilsin mi?"; alacaklı: "bu dosyanın alacaklı IBAN'ı olarak kaydedilsin mi?"
+    function ibanGir(d, kime) {
+        kur();
+        kutu.innerHTML = '';
+        ort.style.display = 'flex';
+        const ust = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:8px;');
+        ust.appendChild(el('div', 'font-size:14px;font-weight:700;', kime === 'V' ? 'Parayı iste — yeni IBAN (vekil)' : 'Parayı iste — alacaklı IBAN\'ı'));
+        const x = el('span', 'font-size:18px;color:#9ca3af;cursor:pointer;padding:0 4px;', '×');
+        x.addEventListener('click', kapat);
+        ust.appendChild(x);
+        kutu.appendChild(ust);
+        kutu.appendChild(el('div', 'margin-top:2px;color:#cbd5e1;word-break:break-word;', dosyaBilgisi(d)));
+        const etiket = el('label', 'display:block;margin-top:10px;font-weight:600;', 'IBAN');
+        const giris = el('input', 'font-family:Consolas,monospace;letter-spacing:0.5px;');
+        giris.placeholder = 'TR00 0000 0000 0000 0000 0000 00';
+        giris.autocomplete = 'off';
+        giris.spellcheck = false;
+        etiket.appendChild(giris);
+        kutu.appendChild(etiket);
+        let adGiris = null;
+        if (kime === 'V') {
+            const a = el('label', 'display:block;margin-top:8px;font-weight:600;', 'Etiket (isteğe bağlı)');
+            adGiris = el('input');
+            adGiris.placeholder = 'ör. Ziraat — büro hesabı';
+            adGiris.maxLength = 120;
+            a.appendChild(adGiris);
+            kutu.appendChild(a);
+        }
+        const kaydetSatir = el('label', 'display:flex;align-items:center;gap:6px;margin-top:10px;cursor:pointer;');
+        const kaydet = el('input', 'width:auto;margin:0;');
+        kaydet.type = 'checkbox';
+        kaydet.checked = true;
+        kaydetSatir.appendChild(kaydet);
+        kaydetSatir.appendChild(el('span', '', kime === 'V' ? 'Bu IBAN\'ı IBAN\'larıma kaydet' : 'Bu dosyanın alacaklı IBAN\'ı olarak kaydet'));
+        kutu.appendChild(kaydetSatir);
+        const durum = el('div', 'margin-top:8px;color:#fca5a5;word-break:break-word;');
+        kutu.appendChild(durum);
+        const ileri = async function() {
+            const iban = ibanDuzelt(giris.value);
+            if (!iban) { durum.textContent = 'IBAN geçersiz: "TR" + 24 rakam olmalı ve kontrol hanesi tutmalı.'; giris.focus(); return; }
+            if (kaydet.checked) {
+                try {
+                    if (kime === 'V') await veriPost('iban_ekle', { iban: iban, etiket: adGiris ? adGiris.value : '' });
+                    else await veriPost('alacakli_iban', { birim_id: String(d.birimId || ''), dosya_no: String(d.dosyaNo || ''),
+                                                           birim_adi: String(d.birimAdi || ''), iban: iban });
+                } catch (e) { durum.textContent = 'IBAN kaydedilemedi: ' + e.message; return; }
+            }
+            paraBorclu(d, kime, iban);
+        };
+        giris.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); ileri(); } });
+        kutu.appendChild(dugme('Devam', 'var(--cu-vurgu)', ileri));
+        kutu.appendChild(dugme('Vazgeç', 'rgba(255,255,255,0.15)', kapat));
+        setTimeout(function() { giris.focus(); }, 0);
+    }
+    // Talep bir borçlu üzerinden gönderilir (UYAP ekranındaki "Borçlu" seçimi); birden çok borçluda sorulur.
+    async function paraBorclu(d, kime, iban) {
+        let borclular;
+        try { borclular = await borcluListesi(d); } catch (e) { paraHata('Borçlular okunamadı: ' + e.message); return; }
+        if (!borclular.length) { paraHata('Bu dosyada borçlu bulunamadı.'); return; }
+        if (borclular.length === 1) { paraOnay(d, kime, iban, borclular[0]); return; }
+        paraMenu('Talep hangi borçlu için?', borclular.map(function(b) { return [b.ad, function() { paraOnay(d, kime, iban, b); }]; }));
+    }
+    function paraOnay(d, kime, iban, borclu) {
+        kur();
+        kutu.innerHTML = '';
+        ort.style.display = 'flex';
+        const ust = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:8px;');
+        ust.appendChild(el('div', 'font-size:14px;font-weight:700;', 'Ödemelerin Hesaba Aktarılması Talebi'));
+        const x = el('span', 'font-size:18px;color:#9ca3af;cursor:pointer;padding:0 4px;', '×');
+        x.addEventListener('click', function() { if (!t121Mesgul) kapat(); });
+        ust.appendChild(x);
+        kutu.appendChild(ust);
+        const satir = function(a, b) {
+            const s = el('div', 'margin-top:4px;display:flex;gap:8px;');
+            s.appendChild(el('span', 'min-width:110px;color:#9ca3af;', a));
+            s.appendChild(el('span', 'word-break:break-word;font-weight:600;', b));
+            kutu.appendChild(s);
+        };
+        satir('Dosya', dosyaBilgisi(d));
+        satir('Borçlu', borclu.ad);
+        satir('Hesap kime ait', kime === 'V' ? 'Vekil' : 'Alacaklı');
+        satir('IBAN', ibanGruplu(iban));
+        const durum = el('div', 'margin-top:10px;color:#cbd5e1;word-break:break-word;');
+        kutu.appendChild(durum);
+        const gonder = dugme('E-imzala ve Gönder', 'var(--cu-vurgu)', async function(b) {
+            if (t121Mesgul) return;
+            t121Mesgul = true;
+            b.disabled = vazgec.disabled = true;
+            b.style.opacity = '0.6';
+            try {
+                const sonuc = await gonderPara(d, borclu, kime, iban, function(m) { durum.style.color = '#cbd5e1'; durum.textContent = m; });
+                durum.style.color = '#86efac';
+                durum.textContent = '✓ Gönderildi. ' + (sonuc.message || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                b.remove();
+                vazgec.textContent = 'Kapat';
+                vazgec.disabled = false;
+            } catch (e) {
+                durum.style.color = '#fca5a5';
+                durum.textContent = e.message;
+                b.disabled = vazgec.disabled = false;
+                b.style.opacity = '';
+            } finally {
+                t121Mesgul = false;
+            }
+        });
+        const vazgec = dugme('Vazgeç', 'rgba(255,255,255,0.15)', function() { if (!t121Mesgul) kapat(); });
+        kutu.appendChild(gonder);
+        kutu.appendChild(vazgec);
+    }
+    async function gonderPara(d, borclu, kime, iban, ilerle) {
+        ilerle('Talep türü UYAP\'tan alınıyor…');
+        const turler = await uyapTaze('getPortalAvukatTalepList.ajx', { dosyaId: d.dosyaId, islemTuru: 'genel' });
+        const tur = (Array.isArray(turler) ? turler : []).find(function(t) {
+            return t && (Number(t.talepKodu) === 14 || /hesaba aktar/.test(kucukHarf(t.talepAdi)));
+        });
+        if (!tur) throw new Error('UYAP\'ın genel talep listesinde "Borçlu Tarafından Yapılan Ödemelerin Hesaba Aktarılması" '
+            + 'bulunamadı; dosya durumu bu talebe izin vermiyor olabilir.');
+        const masraf = Number(tur.talepMasrafi) || 0;
+        if (masraf > 0) throw new Error('Bu talep ' + masraf + ' TL masraflı görünüyor; ödeme bilgisi gerektiği için '
+            + 'buradan gönderilmedi. UYAP\'ın Talep Gönder ekranını kullanın.');
+        const talepBilgileri = JSON.stringify([Object.assign({}, tur, {
+            hesapKimeAit: kime, hesapKimeAitText: kime === 'V' ? 'Vekil' : 'Alacaklı', ibanNo: iban, masraf: masraf,
+            fields: [{ id: 'hesapKimeAitText', title: 'Hesap Kime Ait' }, { id: 'ibanNo', title: 'IBAN No' }], id: 0 })]);
+        return talepEvrakiGonder(d, borclu, talepBilgileri, '_Genel_Talebi', ilerle);
+    }
     async function veriPost(uc, govde) {
         const r = await window.fetch('/__cu__/veri/' + uc, { method: 'POST', cache: 'no-store', credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(govde) });
@@ -5378,14 +5606,16 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
         } catch (e) { hata(e); return; }
         const m = j.mazbata || {};
         const mzNo = parseInt(evrak.birimEvrakNo, 10);
-        const bagla = async function(tebligat, mazbata, tebligTarihi, sonra) {
+        const bagla = async function(tebligat, mazbata, tebligTarihi, sonra, iade) {
             govde.replaceChildren(el('div', '', 'Kaydediliyor…'));
-            try { await veriPost('mazbata_bagla', { dosya: j.dosya, tebligat: tebligat, mazbata: mazbata, teblig_tarihi: tebligTarihi || null }); }
+            try { await veriPost('mazbata_bagla', { dosya: j.dosya, tebligat: tebligat, mazbata: mazbata, teblig_tarihi: tebligTarihi || null, iade: !!iade }); }
             catch (e) { hata(e); return; }
             govde.replaceChildren(el('div', 'color:#86efac;font-weight:600;', sonra),
                 el('div', 'margin-top:4px;', 'Tebliğ durumu ve kesinleşme yeniden hesaplandı.'), dugme('Kapat', 'rgba(255,255,255,0.15)', kapat));
         };
-        // Tebliğ günü PTT'de yoksa (eski barkod PTT'den silinir) mazbatadaki tarih sorulur; boş bırakılabilir.
+        // Tebliğ günü PTT'de yoksa (eski barkod PTT'den silinir) mazbatanın sonucu sorulur: tebliğ edildiyse mazbatadaki
+        // tarih (boş bırakılabilir); iade döndüyse tarih istenmez (26.11.2026, kullanıcı bulgusu: iade dönen tebligatın
+        // tebliğ tarihi olmaz). İade işaretli bağda tebligat İade sayılır, kesinleşme başlamaz.
         const tarihleBagla = function(t) {
             if (mzTebligGunuVar(t)) { bagla(t.evrak_no, mzNo, null, 'Mazbata bağlandı: ' + etiket(t)); return; }
             const giris = el('input', 'width:auto;margin:0 0 0 8px;');
@@ -5393,26 +5623,37 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
             const ust = mzIsoGun(evrak.onaylandigiTarih) || new Date().toISOString().slice(0, 10);
             giris.max = ust;
             if (mzIsoGun(t.evrak_tarihi)) giris.min = mzIsoGun(t.evrak_tarihi);
-            if (m.elle_tebligat === t.evrak_no && m.teblig_tarihi) giris.value = mzIsoGun(m.teblig_tarihi);
-            const satir = el('label', 'display:flex;align-items:center;margin-top:10px;', 'Tebliğ tarihi');
+            if (m.elle_tebligat === t.evrak_no && m.teblig_tarihi && !m.iade) giris.value = mzIsoGun(m.teblig_tarihi);
+            const satir = el('label', 'display:flex;align-items:center;margin-top:6px;', 'Tebliğ tarihi');
             satir.appendChild(giris);
+            const iadeDugme = dugme('İade döndü (tebliğ edilemedi)', 'rgba(234,88,12,0.75)', function() {
+                bagla(t.evrak_no, mzNo, null, 'Mazbata bağlandı: ' + etiket(t) + ' · iade (tebliğ edilemedi)', true);
+            });
+            iadeDugme.title = 'Tebligat İade sayılır; kesinleşme başlamaz, "ödeme emri iade dönen" işlemlerinde görünür.';
             govde.replaceChildren(el('div', 'font-weight:600;', etiket(t)),
                 el('div', 'margin-top:6px;color:#fde68a;', 'Bu tebligatın tebliğ günü PTT\'de yok (eski barkodlar PTT\'nin sisteminden silinir). '
-                    + 'Mazbatada yazan tebliğ tarihini girerseniz kesinleşme bu günden hesaplanır.'), satir,
-                dugme('Bağla', 'var(--cu-vurgu)', function() {
+                    + 'Mazbatanın sonucu nedir?'),
+                el('div', 'margin-top:10px;font-weight:600;', 'Tebliğ edildi'),
+                el('div', 'margin-top:2px;color:#9ca3af;', 'Mazbatada yazan tebliğ tarihini girerseniz kesinleşme bu günden hesaplanır.'), satir,
+                dugme('Tebliğ edildi olarak bağla', 'var(--cu-vurgu)', function() {
                     if (!giris.value) { giris.focus(); return; }
                     bagla(t.evrak_no, mzNo, giris.value, 'Mazbata bağlandı: ' + etiket(t) + ' · tebliğ ' + giris.value.split('-').reverse().join('.'));
                 }),
                 dugme('Tarihsiz bağla', 'rgba(255,255,255,0.12)', function() { bagla(t.evrak_no, mzNo, null, 'Mazbata bağlandı: ' + etiket(t)); }),
+                el('div', 'margin-top:12px;font-weight:600;', 'İade döndü'),
+                el('div', 'margin-top:2px;color:#9ca3af;', 'Tebliğ tarihi gerekmez.'),
+                iadeDugme,
+                el('div', 'margin-top:8px;'),
                 dugme('Geri', 'rgba(255,255,255,0.15)', ciz));
-            giris.focus();
         };
         const tebs = j.tebligatlar || [];
         const ciz = function() {
             govde.innerHTML = '';
             const bagli = m.elle_tebligat ? tebs.find(function(t) { return t.evrak_no === m.elle_tebligat; }) : null;
             govde.appendChild(el('div', '', m.elle_tebligat ? 'Şu an elle bağlı: ' + (bagli ? etiket(bagli) : 'evrak ' + m.elle_tebligat)
-                + (m.teblig_tarihi ? ' · mazbatadaki tebliğ tarihi ' + m.teblig_tarihi : '') : 'Elle bağ yok (barkod ve tarihle otomatik eşleşme geçerli).'));
+                + (m.iade ? ' · iade döndü (tebliğ edilemedi)' + (m.teblig_tarihi ? ' ' + m.teblig_tarihi : '')
+                          : (m.teblig_tarihi ? ' · mazbatadaki tebliğ tarihi ' + m.teblig_tarihi : ''))
+                : 'Elle bağ yok (barkod ve tarihle otomatik eşleşme geçerli).'));
             const a = mzAdaylari({ evrak_tarihi: evrak.onaylandigiTarih, elle_tebligat: m.elle_tebligat }, tebs);
             if (!a.liste.length) {
                 govde.appendChild(el('div', 'margin-top:6px;color:#fde68a;', tebs.length ? 'Bu mazbatadan önce giden PTT tebligatı yok.'
@@ -5431,7 +5672,7 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
                 });
                 if (a.elenen) govde.appendChild(el('div', 'margin-top:6px;color:#9ca3af;', a.elenen + ' tebligat mazbatadan sonra gittiği için listelenmedi.'));
             }
-            if (bagli && !mzTebligGunuVar(bagli)) govde.appendChild(dugme(m.teblig_tarihi ? 'Tebliğ tarihini değiştir' : 'Mazbatadaki tebliğ tarihini gir',
+            if (bagli && !mzTebligGunuVar(bagli)) govde.appendChild(dugme(m.iade ? 'Mazbata sonucunu değiştir' : m.teblig_tarihi ? 'Tebliğ tarihini değiştir' : 'Mazbatanın sonucunu / tebliğ tarihini gir',
                 'rgba(255,255,255,0.12)', function() { tarihleBagla(bagli); }));
             if (m.elle_tebligat) govde.appendChild(dugme('Elle bağı kaldır', 'rgba(239,68,68,0.55)',
                 function() { bagla(m.elle_tebligat, null, null, 'Elle bağ kaldırıldı; otomatik eşleşmeye dönüldü.'); }));
@@ -5909,6 +6150,10 @@ const INLINE_INJECT_SCRIPT: &str = r#####"<script>
             let mzG = null;
             try { mzG = mazbataBagMenusu(h); } catch (e) {}
             if (mzG) kartG = mzG.concat(kartG || []);
+            // Tahsilat makbuzu (evrak ağacındaki satır ya da görüntüleyicide açık belge): "Parayı iste" en üstte.
+            let paraG = null;
+            try { paraG = paraIsteMenusu(h); } catch (e) {}
+            if (paraG) kartG = paraG.concat(kartG || []);
             // Ek betiklerin satırları (ör. paylas.js: belge üzerinde "Belgeyi paylaş")
             let ekG = [];
             (window.__uyapSagMenuEkleri || []).forEach(function(f) {
@@ -5953,6 +6198,7 @@ const _EK_BETIK_DOSYALARI: &[&str] = &[
     "paylas.js",
     "guncelleme.js",
     "yazi.js",
+    "ayarlar.js",
 ];
 // armonia-renk.css: UYAP stilindeki lacivert/gri renkleri tema değişkenlerimize bağlayan, araclar/renk_uret.py ile
 // üretilen katman (2026-11-14). tema.css'ten önce gelir: elle ince ayarlar eşit özgüllükte kazanır.
