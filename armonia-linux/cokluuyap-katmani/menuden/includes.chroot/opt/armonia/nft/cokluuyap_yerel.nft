@@ -1,7 +1,11 @@
 # Coklu UYAP dilimi (armonia-cokluuyap.slice): yerelde YALNIZ DNS (resolved), Adalet E-imza (5975) ve kendi vekili
-# (8800); yerel ag kapali; internet acik. Sondaki 'accept', paketin ardindan gelen oturum_yerel zincirine
-# (8800'u reddeder) dusmesini onler. Birim baslarken yuklenir (cgroup yolu ancak dilim varken cozulur).
-# Masaustu oturumunun geri kalani 8800'e GIDEMEZ (vekilde UYAP oturumu var). Claude, 2026-11-23.
+# (8800); yerel ag (LAN) KAPALI — tek istisna: buro ici PAYLASIMLI sunucu kurulumunda (sunucu baska bir
+# bilgisayarda) yine yalniz 8800'e gidilebilir, baska hicbir LAN adresi/portuna degil (kullanici karari 25.11:
+# bu olmadan coklu bilgisayarli burolarda sunucuya hic baglanilamiyordu). systemd biriminde IPAddressAllow bu
+# araligi da kapsamali (goruniyor: armonia-cokluuyap.service) — yoksa bu nft kurali hic calismadan paket daha
+# once systemd/cgroup katmaninda dusurulur. Internet acik. Sondaki 'accept', paketin ardindan gelen oturum_yerel
+# zincirine (8800'u reddeder) dusmesini onler. Birim baslarken yuklenir (cgroup yolu ancak dilim varken cozulur).
+# Masaustu oturumunun geri kalani 8800'e GIDEMEZ (vekilde UYAP oturumu var). Claude, 2026-11-23 (LAN istisnasi 25.11).
 flush chain inet filter cokluuyap_giris
 # Giris: 8800'e gelen yeni baglanti, dinleyen soket Coklu UYAP diliminde ise isaretlenir; cikis zincirindeki
 # 'ct mark 0x8800 ct direction reply accept' vekilin yanitlarini (SYN-ACK dahil) gecirir (denetci 23.11 K3)
@@ -15,6 +19,9 @@ add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armo
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr ::1 tcp dport { 5975, 8800 } accept
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr 127.0.0.0/8 reject
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr ::1 reject
+# Buro ici paylasimli sunucu: yalniz 8800, yalniz bu uc LAN araligi (RFC1918); baska LAN port/adresi asagidaki
+# genel reddin arkasinda kapali kalir (kullanici karari 25.11).
+add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } tcp dport 8800 accept
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 255.255.255.255 } reject
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" ip6 daddr { fc00::/7, fe80::/10 } reject
 add rule inet filter cokluuyap_yerel socket cgroupv2 level 2 "armonia.slice/armonia-cokluuyap.slice" accept

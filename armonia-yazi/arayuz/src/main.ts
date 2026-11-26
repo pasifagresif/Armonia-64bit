@@ -35,12 +35,30 @@ interface Acik {
   kimlik?: number;
   /** İmzalı belge salt okunur açılır (düzenleme imzayı geçersiz kılar) */
   salt: boolean;
+  /** "Yeni" ile açılmış, henüz dosyası olmayan belge (dokunulmadıysa açılan ilk belge onun yerine geçer) */
+  yeni?: boolean;
 }
 
-let acik: Acik | null = null;
+/** Açık belgelerden biri (kullanıcı isteği 26.11: tek pencerede birden çok belge). Her sekmenin kendi sayfa
+ * kabı ve kendi editörü (geri alma geçmişiyle) vardır; arkadaki sekmeler gizli durur, yeniden kurulmaz. */
+interface Sekme {
+  acik: Acik;
+  gorunum: EditorView;
+  kap: HTMLElement;
+  degisti: boolean;
+  olcekUygula: () => void;
+  sayfaSayisi: number;
+  varsayilanYazi: { aile: string; boyut: number };
+  /** Bildirim şeridinin bu belgeye ait içeriği (sekme arkadayken burada saklanır) */
+  bildirim: { sinif: string; dugumler: Node[] } | null;
+  kaydirma: [number, number];
+  onekZamani: number;
+}
+
+let sekmeler: Sekme[] = [];
+let etkin: Sekme | null = null;
+// Etkin sekmenin editörü (etkinlestir() eşitler)
 let gorunum: EditorView | null = null;
-let degisti = false;
-let onekZamani = 0;
 /** Biçimsiz metnin yazısı (belgenin hvl-default stili): seçiciler biçim işareti yoksa bunu gösterir. */
 let varsayilanYazi = { aile: "Times New Roman", boyut: 12 };
 
@@ -108,10 +126,11 @@ function kenarCiz(bloklar: Blok[] | undefined, g: GBlok[] | null, genislik: numb
   return el;
 }
 
-function sayfayiKur(a: Acilis) {
+/** Belgenin sayfa kabını ve editörünü kurar; sekmeyi döndürür (listeye eklemek ve öne almak çağırana ait).
+ * Kap görünür eklenir (ölçümler gizli öğede yapılamaz): çağıran, önceki sekmeyi önceden gizlemiş olmalı. */
+function sayfayiKur(a: Acilis, bilgi: Acik): Sekme {
   const s = a.gorunum.sayfa;
   const masa = $("#masa");
-  masa.innerHTML = "";
   const sayfaH = s.yukseklik * PT, sayfaW = s.genislik * PT;
   const yaziW = (s.genislik - s.sol - s.sag) * PT;
 
@@ -150,8 +169,12 @@ function sayfayiKur(a: Acilis) {
     yaziAlti: Math.min(sayfaH - s.alt * PT, altH ? sayfaH - s.alt_bilgi_payi * PT - altH : Infinity),
     olcek: 1,
   };
+  const sekme = {
+    acik: bilgi, kap, degisti: false, sayfaSayisi: 1, bildirim: null, kaydirma: [0, 0], onekZamani: 0,
+    varsayilanYazi: { aile: "Times New Roman", boyut: 12 }, olcekUygula: () => {},
+  } as unknown as Sekme;
   // Yakınlaştırma: "genislik" / "sayfa" pencereye göre hesaplanır
-  olcekUygula = () => {
+  sekme.olcekUygula = () => {
     const cs = getComputedStyle(masa);
     const bosW = masa.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     const bosH = masa.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
@@ -160,20 +183,23 @@ function sayfayiKur(a: Acilis) {
       : Number(olcekSecimi) / 100;
     const yeni = Math.min(4, Math.max(0.2, o || 1));
     olcu.olcek = yeni;
-    sonOlcek = yeni;
     sayfa.style.transform = `scale(${yeni})`;
     kap.style.width = `${sayfaW * yeni}px`;
     kap.style.height = `${toplamH * yeni}px`;
-    secici.olcek.title = `Yakınlaştırma: %${Math.round(yeni * 100)}`;
-    gorunum?.dispatch(gorunum.state.tr.setMeta(YENIDEN_OLC, true).setMeta("addToHistory", false));
+    if (etkin === sekme || !etkin) {
+      sonOlcek = yeni;
+      secici.olcek.title = `Yakınlaştırma: %${Math.round(yeni * 100)}`;
+    }
+    const g = sekme.gorunum as EditorView | undefined;
+    g?.dispatch(g.state.tr.setMeta(YENIDEN_OLC, true).setMeta("addToHistory", false));
   };
   govde.style.paddingTop = `${olcu.yaziUstu}px`;
   // Biçimsiz metin (yeni paragraf, yeni tablo hücresi) UDF'te belgenin varsayılan stilini alır (hvl-default;
   // stil.rs ile aynı varsayılanlar: Times New Roman 12): ekranda da öyle görünsün
   const vs = a.belge.stiller.find((st) => st.ad === "hvl-default")?.oz ?? [];
-  varsayilanYazi = { aile: ozAl(vs, "family") || "Times New Roman", boyut: Number(ozAl(vs, "size")) > 0 ? Number(ozAl(vs, "size")) : 12 };
-  govde.style.fontFamily = cssAilesi(varsayilanYazi.aile);
-  govde.style.fontSize = `${varsayilanYazi.boyut}pt`;
+  sekme.varsayilanYazi = { aile: ozAl(vs, "family") || "Times New Roman", boyut: Number(ozAl(vs, "size")) > 0 ? Number(ozAl(vs, "size")) : 12 };
+  govde.style.fontFamily = cssAilesi(sekme.varsayilanYazi.aile);
+  govde.style.fontSize = `${sekme.varsayilanYazi.boyut}pt`;
 
   // Sayfa sayısı değişince katman: kâğıtlar, üst/alt bilgi, sayfa numarası
   const katmaniCiz = (n: number) => {
@@ -220,7 +246,8 @@ function sayfayiKur(a: Acilis) {
       }
     }
     sekmeleriYerlestir(katman, olcu.olcek);
-    $("#sayfa-sayisi").textContent = `${n} sayfa`;
+    sekme.sayfaSayisi = n;
+    if (etkin === sekme) $("#sayfa-sayisi").textContent = `${n} sayfa`;
   };
 
   const doc = belgeDugumu(a.belge, a.gorunum);
@@ -230,8 +257,7 @@ function sayfayiKur(a: Acilis) {
   console.info(`[Armonia Yazı] gidiş-dönüş denetimi: ${ayni ? "TAMAM" : "FARK VAR"}`);
   if (!ayni) bildir("Uyarı: bu belgenin bazı öğeleri editörde birebir korunamıyor; kaydetmeden önce kontrol edin.", "uyari");
 
-  gorunum?.destroy();
-  gorunum = new EditorView(govde, {
+  const view: EditorView = new EditorView(govde, {
     state: EditorState.create({
       doc,
       plugins: [
@@ -241,6 +267,9 @@ function sayfayiKur(a: Acilis) {
           "Mod-b": kalin, "Mod-i": egik, "Mod-u": alti,
           "Mod-s": () => { kaydet(); return true; },
           "Mod-n": () => { yeniBelge(); return true; },
+          "Mod-w": () => { if (etkin) sekmeKapat(etkin); return true; },
+          "Mod-PageDown": () => { komsuSekme(1); return true; },
+          "Mod-PageUp": () => { komsuSekme(-1); return true; },
           "Mod-o": () => { acmaIste(); return true; },
           "Enter": paragrafBol,
           "Tab": chainCommands(hucreGec(1), sekmeEkle),
@@ -252,23 +281,153 @@ function sayfayiKur(a: Acilis) {
       ],
     }),
     // İmzalı belge salt okunur (acik.salt); "Düzenlemeyi aç" ile açılır
-    editable: () => !acik?.salt,
+    editable: () => !sekme.acik.salt,
     dispatchTransaction(tr) {
-      if (!gorunum) return;
-      gorunum.updateState(gorunum.state.apply(tr));
+      view.updateState(view.state.apply(tr));
       // Liste önekleri ve sayfa boşlukları belgeyi "değişmiş" yapmaz (kaydedilen içerik aynı)
       if (tr.docChanged && tr.getMeta("addToHistory") !== false) {
-        degisti = true;
-        clearTimeout(onekZamani);
-        onekZamani = window.setTimeout(() => gorunum && acik && onekleriYenile(gorunum, acik.belge), 250);
+        const ilk = !sekme.degisti;
+        sekme.degisti = true;
+        sekme.acik.yeni = false;
+        clearTimeout(sekme.onekZamani);
+        sekme.onekZamani = window.setTimeout(() => sekmeler.includes(sekme) && onekleriYenile(view, sekme.acik.belge), 250);
+        if (ilk) sekmeCubuguCiz();
       }
-      cubuguGuncelle();
+      if (etkin === sekme) cubuguGuncelle();
     },
   });
-  degisti = false;
-  olcekUygula();
+  sekme.gorunum = view;
+  sekme.olcekUygula();
+  return sekme;
+}
+
+// ── Sekmeler ────────────────────────────────────────────────────────────────────────────────────────
+
+function sekmeAdi(s: Sekme): string {
+  return `${s.acik.kok}.${s.acik.bicim}`;
+}
+
+/** Etkin sekmeyi arkaya alır: kaydırma konumu ve bildirim şeridi sekmede saklanır, sayfa kabı gizlenir. */
+function etkiniGizle() {
+  if (!etkin || etkin.kap.hidden) return; // zaten arkada: saklanan bildirim/kaydırma ezilmesin
+  const masa = $("#masa"), b = $("#bildirim");
+  etkin.kaydirma = [masa.scrollLeft, masa.scrollTop];
+  etkin.bildirim = b.hidden ? null : { sinif: b.className, dugumler: [...b.childNodes] };
+  b.replaceChildren();
+  b.hidden = true;
+  etkin.kap.hidden = true;
+}
+
+/** Sekmeyi öne alır (null: açık belge kalmadı, karşılama görünür). */
+function etkinlestir(s: Sekme | null) {
+  if (etkin !== s) etkiniGizle();
+  etkin = s;
+  gorunum = s?.gorunum ?? null;
+  $("#karsilama").hidden = !!s;
+  const b = $("#bildirim");
+  if (s) {
+    s.kap.hidden = false;
+    if (s.bildirim) {
+      b.className = s.bildirim.sinif;
+      b.replaceChildren(...s.bildirim.dugumler);
+      b.hidden = false;
+      s.bildirim = null;
+    }
+    varsayilanYazi = s.varsayilanYazi;
+    olcekUygula = s.olcekUygula;
+    olcekUygula(); // pencere boyutu sekme arkadayken değişmiş olabilir; sayfa sonları da yeniden ölçülür
+    $("#masa").scrollTo(s.kaydirma[0], s.kaydirma[1]);
+    $("#sayfa-sayisi").textContent = `${s.sayfaSayisi} sayfa`;
+    document.title = `${sekmeAdi(s)} — Armonia Yazı`;
+    s.gorunum.focus();
+  } else {
+    olcekUygula = () => {};
+    $("#sayfa-sayisi").textContent = "";
+    document.title = "Armonia Yazı";
+  }
   cubuguGuncelle();
-  gorunum.focus();
+  sekmeCubuguCiz();
+}
+
+/** Bildirim şeridine yazar: sekme öndeyse doğrudan, arkadaysa sekmeye saklar (öne gelince görünür). */
+function bildirimKoy(s: Sekme, sinif: string, dugumler: Node[]) {
+  if (etkin !== s) {
+    s.bildirim = { sinif, dugumler };
+    return;
+  }
+  const b = $("#bildirim");
+  b.className = sinif;
+  b.replaceChildren(...dugumler);
+  b.hidden = false;
+}
+
+/** Yeni kurulan sekmeyi listeye koyar ve öne alır. `yerine` verilirse o sekmenin yerini alır (eski kapanır). */
+function sekmeEkle_(s: Sekme, yerine?: Sekme | null) {
+  const sira = yerine ? sekmeler.indexOf(yerine) : -1;
+  if (yerine && sira >= 0) {
+    clearTimeout(yerine.onekZamani);
+    yerine.gorunum.destroy();
+    yerine.kap.remove();
+    sekmeler = sekmeler.map((x) => (x === yerine ? s : x));
+    if (etkin === yerine) {
+      // Eski sekme zaten gizlendi (sayfa kurulmadan önce); bildirimi yeni belgeye taşınmaz
+      etkin = null;
+    }
+  } else {
+    sekmeler = [...sekmeler, s];
+  }
+  etkinlestir(s);
+}
+
+function sekmeKapat(s: Sekme) {
+  if (s.degisti && !window.confirm(`"${sekmeAdi(s)}" kaydedilmedi. Yine de kapatılsın mı?`)) return;
+  const sira = sekmeler.indexOf(s);
+  if (sira < 0) return;
+  if (etkin === s) etkiniGizle();
+  clearTimeout(s.onekZamani);
+  s.gorunum.destroy();
+  s.kap.remove();
+  sekmeler = sekmeler.filter((x) => x !== s);
+  if (etkin === s) {
+    etkin = null;
+    etkinlestir(sekmeler[Math.min(sira, sekmeler.length - 1)] ?? null);
+  } else sekmeCubuguCiz();
+}
+
+function komsuSekme(yon: 1 | -1) {
+  if (!etkin || sekmeler.length < 2) return;
+  const n = sekmeler.length;
+  etkinlestir(sekmeler[(sekmeler.indexOf(etkin) + yon + n) % n]);
+}
+
+function sekmeCubuguCiz() {
+  const c = $("#sekmeler");
+  c.hidden = sekmeler.length === 0;
+  const ogeler: HTMLElement[] = sekmeler.map((s) => {
+    const el = document.createElement("div");
+    el.className = s === etkin ? "sekme-basligi etkin" : "sekme-basligi";
+    el.title = sekmeAdi(s) + (s.degisti ? " (kaydedilmedi)" : "");
+    const ad = document.createElement("span");
+    ad.className = "ad";
+    ad.textContent = sekmeAdi(s) + (s.degisti ? " •" : "");
+    const kapat = document.createElement("button");
+    kapat.textContent = "×";
+    kapat.title = "Sekmeyi kapat (Ctrl+W)";
+    kapat.setAttribute("aria-label", `${sekmeAdi(s)} sekmesini kapat`);
+    kapat.onclick = (e) => { e.stopPropagation(); sekmeKapat(s); };
+    el.onmousedown = (e) => e.preventDefault(); // editör odağı kaçmasın
+    el.onclick = () => etkinlestir(s);
+    el.onauxclick = (e) => { if (e.button === 1) sekmeKapat(s); };
+    el.append(ad, kapat);
+    return el;
+  });
+  const arti = document.createElement("button");
+  arti.className = "sekme-yeni";
+  arti.textContent = "+";
+  arti.title = "Yeni boş belge (Ctrl+N)";
+  arti.onmousedown = (e) => e.preventDefault();
+  arti.onclick = () => yeniBelge();
+  c.replaceChildren(...ogeler, arti);
 }
 
 // ── Yakınlaştırma ───────────────────────────────────────────────────────────────────────────────────
@@ -321,39 +480,38 @@ function boyutDegisti() {
   olcekUygula();
 }
 
-/** "Aç": masaüstünde sistemin dosya penceresi, tarayıcıda dosya seçici. */
+/** "Aç": tarayıcıda dosya seçici. Masaüstünde yerli dosya penceresi yok (armonia-yazi@.service'te D-Bus/portal
+ * kasıtlı olarak kapalı, denetçi 24.11 O4); belge Armonia Dosyalar'da çift tıklanarak açılır (kullanıcı kararı
+ * 25.11). Claude, 2026-11-25. */
 async function acmaIste() {
   if (!masaustu) {
     $<HTMLInputElement>("#dosya").click();
     return;
   }
-  try {
-    const d = await cagir<MasaustuDosya | null>("dosya_ac");
-    if (d) await belgeAc(d.ad, b64Coz(d.bayt), d.kimlik);
-  } catch (e) {
-    bildir(`Açılamadı: ${e}`, "hata");
-  }
+  bildir("Belgeyi Armonia Dosyalar'da çift tıklayarak açın.", "bilgi");
 }
 
 /** "İmzala": belgenin kaydedilecek son hâli (UDF) karttaki sertifikayla imzalanır, imzalı UDF kaydedilir ve
  * salt okunur açılır. Word olarak açılmış belge de UDF olarak imzalanır (UYAP UDF ister). */
 function imzalaIste() {
-  if (!acik || !gorunum) return;
+  const s = etkin;
+  if (!s) return;
   if (!masaustu) {
     bildir("E-imza yalnız Armonia Yazı masaüstü uygulamasında (bilgisayara takılı kartla) kullanılabilir.", "uyari");
     return;
   }
-  const kok = acik.kok;
+  const kok = s.acik.kok;
   imzaPenceresiAc({
     dosyaAdi: `${kok}.udf`,
-    belge: () => udf_kaydet(belgeyeCevir(gorunum!.state.doc, acik!.belge)) as Uint8Array,
+    belge: () => udf_kaydet(belgeyeCevir(s.gorunum.state.doc, s.acik.belge)) as Uint8Array,
     bitti: async (imzali, bilgi) => {
       try {
         const k = await cagir<MasaustuKayit | null>("dosya_kaydet", {
-          onerilen: `${kok}.udf`, bayt: b64Kodla(imzali), bicim: "udf", kimlik: acik?.bicim === "udf" ? acik?.kimlik ?? null : null,
+          onerilen: `${kok}.udf`, bayt: b64Kodla(imzali), bicim: "udf", kimlik: s.acik.bicim === "udf" ? s.acik.kimlik ?? null : null,
         });
-        degisti = false;
-        await belgeAc(k ? k.ad : `${kok}.udf`, imzali, k?.kimlik);
+        // İmzalı hâli aynı sekmede (salt okunur) açılır
+        s.degisti = false;
+        await belgeAc(k ? k.ad : `${kok}.udf`, imzali, k?.kimlik, s);
         if (!k) bildir(`İmzalandı (${bilgi.imzalayan}) ama kaydedilmedi. Kaydetmek için Ctrl+S kullanın.`, "uyari");
       } catch (e) {
         bildir(`İmzalandı ama kaydedilemedi: ${e}`, "hata");
@@ -362,35 +520,51 @@ function imzalaIste() {
   });
 }
 
-function yeniBelge() {
-  if (degisti && !window.confirm("Kaydedilmemiş değişiklikler var. Yine de yeni belge açılsın mı?")) return;
+/** Dokunulmamış boş "Yeni belge" sekmesi mi (açılan belge onun yerine geçer, yanına ikincisi açılmaz). */
+function bosYeniMi(s: Sekme | null): s is Sekme {
+  return !!s && !!s.acik.yeni && !s.degisti;
+}
+
+/** Yeni boş belgeyi yeni sekmede açar. `tekrarsiz`: önde zaten dokunulmamış boş belge varsa yenisi açılmaz
+ * (Armonia Yazı açıkken kısayoluna yeniden basılması). */
+function yeniBelge(tekrarsiz = false) {
+  if (tekrarsiz && bosYeniMi(etkin)) return;
   const belge = bosBelgeOlustur();
   const g = gorunum_hesapla(belge) as Acilis["gorunum"];
-  acik = { belge, kok: "Yeni belge", bicim: "udf", gorunum: g, salt: false };
-  $("#bildirim").hidden = true;
-  sayfayiKur({ belge, gorunum: g, imzali: false, uyarilar: [] });
-  document.title = "Yeni belge — Armonia Yazı";
+  etkiniGizle();
+  const s = sayfayiKur({ belge, gorunum: g, imzali: false, uyarilar: [] },
+    { belge, kok: "Yeni belge", bicim: "udf", gorunum: g, salt: false, yeni: true });
+  sekmeEkle_(s);
 }
 
 async function dosyaAc(f: File) {
   await belgeAc(f.name, new Uint8Array(await f.arrayBuffer()));
 }
 
-/** Belgeyi baytlarından açar (tarayıcı: dosya seçici / sürükle-bırak; masaüstü: dosya penceresi, çift tık). */
-async function belgeAc(ad: string, bayt: Uint8Array, kimlik?: number) {
-  if (degisti && !window.confirm("Kaydedilmemiş değişiklikler var. Yine de başka belge açılsın mı?")) return;
+/** Belgeyi baytlarından yeni sekmede açar (tarayıcı: dosya seçici / sürükle-bırak; masaüstü: çift tık).
+ * Aynı dosya zaten açıksa o sekme öne alınır. `yerine`: belge o sekmenin yerine açılır (imzalama sonrası). */
+async function belgeAc(ad: string, bayt: Uint8Array, kimlik?: number, yerine?: Sekme) {
+  if (kimlik != null) {
+    const acikOlan = sekmeler.find((x) => x !== yerine && x.acik.kimlik === kimlik);
+    if (acikOlan) {
+      etkinlestir(acikOlan);
+      bildir("Bu belge zaten açık.", "bilgi");
+      return;
+    }
+  }
   try {
     // Tür içerikten anlaşılır (uzantıya güvenilmez): UDF ya da DOCX
     const a = belge_ac(bayt) as Acilis & { tur: "udf" | "docx" };
-    acik = { belge: a.belge, kok: ad.replace(/\.(udf|docx)$/i, ""), bicim: a.tur, gorunum: a.gorunum, kimlik, salt: a.imzali };
-    $("#bildirim").hidden = true;
-    sayfayiKur(a);
-    document.title = `${ad} — Armonia Yazı`;
+    etkiniGizle();
+    const s = sayfayiKur(a, { belge: a.belge, kok: ad.replace(/\.(udf|docx)$/i, ""), bicim: a.tur, gorunum: a.gorunum, kimlik, salt: a.imzali });
+    sekmeEkle_(s, yerine ?? (bosYeniMi(etkin) ? etkin : null));
     const notlar: string[] = [];
     if (a.uyarilar.length) notlar.push("Korunamayan öğeler: " + a.uyarilar.join("; "));
-    if (a.imzali) await imzaBilgisiGoster(bayt, notlar.join(" "));
+    if (a.imzali) await imzaBilgisiGoster(s, bayt, notlar.join(" "));
     else if (notlar.length) bildir(notlar.join(" "), "uyari");
   } catch (e) {
+    // Açılamadıysa önceki sekme (bildirimi ve kaydırma konumuyla) geri gelsin
+    if (etkin?.kap.hidden) etkinlestir(etkin);
     bildir(`Açılamadı: ${e}`, "hata");
   }
 }
@@ -405,11 +579,8 @@ function yerelZaman(z: string): string {
 }
 
 /** İmzalı belge: imza bilgisi (masaüstünde doğrulanır) ve "Düzenlemeyi aç" düğmesi. Belge salt okunur kalır. */
-async function imzaBilgisiGoster(bayt: Uint8Array, ek: string) {
-  const b = $("#bildirim");
-  b.hidden = false;
-  b.className = "imza";
-  b.textContent = "";
+async function imzaBilgisiGoster(s: Sekme, bayt: Uint8Array, ek: string) {
+  let sinif = "imza";
   const metin = document.createElement("span");
   let bilgi: ImzaBilgisi | null = null;
   if (masaustu) {
@@ -424,7 +595,7 @@ async function imzaBilgisiGoster(bayt: Uint8Array, ek: string) {
       : !bilgi.imza_gecerli ? "İMZA GEÇERSİZ"
       : !bilgi.sure_icinde ? "imza, sertifikanın geçerlilik süresi dışında atılmış"
       : "imza geçerli";
-    b.classList.toggle("hata", !bilgi.belge_degismemis || !bilgi.imza_gecerli);
+    if (!bilgi.belge_degismemis || !bilgi.imza_gecerli) sinif = "imza hata";
     metin.textContent = `E-imzalı: ${bilgi.imzalayan}${bilgi.imza_zamani ? ` · ${yerelZaman(bilgi.imza_zamani)}` : ""} · ${durum}` +
       " (sertifika zinciri ve iptal durumu denetlenmedi). ";
   } else if (!masaustu) {
@@ -435,18 +606,20 @@ async function imzaBilgisiGoster(bayt: Uint8Array, ek: string) {
   dugme.textContent = "Düzenlemeyi aç";
   dugme.title = "Belgeyi değiştirip kaydederseniz imza geçersiz olur; yeniden imzalamanız gerekir.";
   dugme.onclick = () => {
-    if (!acik || !window.confirm("Düzenlerseniz imza geçersiz olur ve belgeyi yeniden imzalamanız gerekir. Devam edilsin mi?")) return;
-    acik.salt = false;
-    gorunum?.setProps({});
-    b.hidden = true;
+    if (!window.confirm("Düzenlerseniz imza geçersiz olur ve belgeyi yeniden imzalamanız gerekir. Devam edilsin mi?")) return;
+    s.acik.salt = false;
+    s.gorunum.setProps({});
+    $("#bildirim").hidden = true;
     cubuguGuncelle();
   };
-  b.append(metin, dugme);
+  bildirimKoy(s, sinif, [metin, dugme]);
 }
 
 /** Kaydeder: verilen biçimde (yoksa açılan biçimde). Word'e kaydederken UYAP'a özgü öğeler (alanlar) düz metin olur. */
 async function kaydet(bicim?: Bicim) {
-  if (!acik || !gorunum) return;
+  const s = etkin;
+  if (!s) return;
+  const acik = s.acik, gorunum = s.gorunum;
   if (acik.salt && !bicim) {
     bildir("İmzalı belge değiştirilmedi; kaydetmeye gerek yok. Farklı biçimde kaydetmek için \"Farklı kaydet\".", "bilgi");
     return;
@@ -465,9 +638,14 @@ async function kaydet(bicim?: Bicim) {
       acik.kimlik = k.kimlik;
       acik.bicim = b;
       acik.kok = k.ad.replace(/\.(udf|docx)$/i, "");
-      degisti = false;
-      cubuguGuncelle();
-      bildir(`Kaydedildi: ${k.yol}`);
+      acik.yeni = false;
+      s.degisti = false;
+      if (etkin === s) {
+        document.title = `${sekmeAdi(s)} — Armonia Yazı`;
+        cubuguGuncelle();
+        bildir(`Kaydedildi: ${k.yol}`);
+      }
+      sekmeCubuguCiz();
       return;
     }
     acik.bicim = b;
@@ -476,7 +654,10 @@ async function kaydet(bicim?: Bicim) {
     a.download = ad;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-    degisti = false;
+    s.degisti = false;
+    acik.yeni = false;
+    cubuguGuncelle();
+    sekmeCubuguCiz();
     bildir(`Kaydedildi: ${ad}`);
   } catch (e) {
     bildir(`Kaydedilemedi: ${e}`, "hata");
@@ -616,8 +797,12 @@ function cubuguKur() {
   girdi.type = "file";
   girdi.id = "dosya";
   girdi.accept = ".udf,.docx";
+  girdi.multiple = true;
   girdi.hidden = true;
-  girdi.onchange = () => girdi.files?.[0] && dosyaAc(girdi.files[0]);
+  girdi.onchange = async () => {
+    for (const f of [...(girdi.files ?? [])]) await dosyaAc(f);
+    girdi.value = ""; // aynı dosya yeniden seçilebilsin
+  };
   c.append(girdi);
   for (const d of DUGMELER) {
     if (d === "|") {
@@ -691,19 +876,21 @@ function cubuguGuncelle() {
       secici.aralik.value = d;
     }
   }
-  $("#durum").textContent = acik ? `${acik.kok}.${acik.bicim}${degisti ? " •" : ""}` : "";
+  $("#durum").textContent = etkin ? `${sekmeAdi(etkin)}${etkin.degisti ? " •" : ""}` : "";
 }
 
 window.addEventListener("beforeunload", (e) => {
-  if (degisti) e.preventDefault();
+  if (sekmeler.some((s) => s.degisti)) e.preventDefault();
 });
 
 // Sürükle-bırak ile açma
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => {
   e.preventDefault();
-  const f = e.dataTransfer?.files?.[0];
-  if (f) dosyaAc(f);
+  const dosyalar = [...(e.dataTransfer?.files ?? [])];
+  void (async () => {
+    for (const f of dosyalar) await dosyaAc(f);
+  })();
 });
 
 void setBlockType; // ileride başlık stilleri
@@ -712,6 +899,14 @@ await init();
 cubuguKur();
 cubuguGuncelle();
 boyutDegisti();
+// Masaüstü: Armonia Yazı açıkken çift tıklanan başka belge / kısayola yeniden basılması, yeni pencere yerine bu
+// pencereye devredilir (kabuk: tek_ornek.rs) ve yeni sekmede açılır
+if (masaustu) {
+  const { listen } = await import("@tauri-apps/api/event");
+  await listen<MasaustuDosya>("dosya-ac", (o) => { void belgeAc(o.payload.ad, b64Coz(o.payload.bayt), o.payload.kimlik); });
+  await listen("yeni-belge", () => yeniBelge(true));
+  await listen<string>("ac-hata", (o) => bildir(`Açılamadı: ${o.payload}`, "hata"));
+}
 // Masaüstü: komut satırından (çift tıkla) gelen dosya
 if (masaustu) {
   cagir<MasaustuDosya | null>("baslangic_dosyasi")

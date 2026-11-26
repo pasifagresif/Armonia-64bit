@@ -1,0 +1,128 @@
+#!/bin/sh
+# Armonia "Windows programlari" ayar aracinin root yardimcisi (windows_ayarlari, armonia-uygulamalar).
+# pkexec ile cagrilir; polkit eylemi tr.armonia.pencere yalniz etkin yerel oturuma, parolasiz acik (ayar-yardimci
+# ile ayni desen: kullanicinin parolasi/sudo yetkisi yok, HER ALT KOMUT dar ve dogrulanmis). Claude, 2026-11-25.
+#   pencere-yardimci yaz <kimlik> -   stdin: 1. AD  2. PAYLASIM  3. PROGRAM  4. SHA256 (bos olabilir)
+#   pencere-yardimci sil <kimlik>     tanimi, bagli paylasimi, kisayolu ve dock kutucugunu kaldirir
+# windows.apps.d/<kimlik>.conf'u paylasim_bagla.sh/windows_calistir.sh'in ayni sekilde okuyabilecegi bicimde
+# yazar (KEY="deger", tek satir); bu yuzden deger icinde '"' ya da satir sonu OLAMAZ (asagida reddedilir).
+# Dock kutucugu CANLI sistemde guncellenir (windows_hazirla.sh'in derleme-zamani ayniyla AYNI isaretleri
+# kullanir: ARMONIA-WINDOWS-BASLA/BITIS): her yaz/sil sonrasi dock.jsonc/dock.css.sablon SIFIRDAN, o anda
+# windows.apps.d'de duran TUM tanimlardan yeniden uretilir (eski kutucuklar once silinir) — tekrarli
+# cagrilarda (ekle/duzenle/sil) kutucuk cogalmasi ya da artik kalmasi engellenir.
+set -eu
+D=/etc/armonia/windows.apps.d
+MASAUSTU=/usr/local/share/applications
+DOCK_J=/etc/armonia/waybar/dock.jsonc
+DOCK_CSS=/etc/armonia/tema/dock.css.sablon
+AYAR=/etc/armonia/ayarlar.conf
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+kimlik_dogrula() {
+  case "$1" in [a-z0-9_-]*) ;; *) echo "gecersiz kimlik: $1 (yalniz a-z0-9_-)" >&2; exit 2 ;; esac
+  [ "${#1}" -le 32 ] || { echo "kimlik en fazla 32 karakter olmali" >&2; exit 2; }
+  case "$1" in _ornek|yonetici) echo "'$1' ayrilmis bir ad" >&2; exit 2 ;; esac
+}
+
+deger_dogrula() {  # alan_adi deger — '"' reddedilir (KEY="deger" bicimini bozar); satir sonu zaten
+  # 'read -r' ile tek satir okunduğu icin degiskende olamaz.
+  case "$2" in *'"'*) echo "$1 icinde \" olamaz" >&2; exit 2 ;; esac
+  return 0
+}
+
+dock_guncelle() {
+  [ -f "$DOCK_J" ] && [ -f "$DOCK_CSS" ] || return 0
+  # 1) Eski windows-* kutucuklarini TEMIZLE (dizi girdisi + tanim satiri + isaretli CSS blogu)
+  # NOT: Turkce locale'de ([a-z0-9_-] gibi) karakter siniflari glibc regex'te BEKLENMEDIK sekilde
+  # eslesmiyor (find -ipath/-iname'deki İ/i sorunuyla ayni aile) — bu yuzden LC_ALL=C ZORUNLU.
+  LC_ALL=C sed -i -E 's/, "custom\/windows-[a-z0-9_-]+"//g' "$DOCK_J"
+  LC_ALL=C sed -i '/^  "custom\/windows-[a-z0-9_-]*":/d' "$DOCK_J"
+  LC_ALL=C sed -i '/\/\* ARMONIA-WINDOWS-BASLA/,/\/\* ARMONIA-WINDOWS-BITIS \*\//d' "$DOCK_CSS"
+  # 2) Su an windows.apps.d'de duran HER tanim icin kutucugu YENIDEN ekle
+  SELEKTORLER=""
+  for f in "$D"/*.conf; do
+    [ -f "$f" ] || continue
+    K=$(basename "$f" .conf)
+    case "$K" in [a-z0-9_-]*) ;; *) continue ;; esac
+    A=$(sed -n 's/^AD="\(.*\)"$/\1/p' "$f" | head -n1); [ -n "$A" ] || A="$K"
+    M="custom/windows-$K"
+    AJ=$(printf '%s' "$A" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    sed -i -e "s|, \"wlr/taskbar\"\]|, \"$M\", \"wlr/taskbar\"]|" \
+      -e "/^  \"modules-center\": \[/a\\  \"$M\": { \"format\": \"$AJ\\\\n \", \"justify\": \"center\", \"tooltip-format\": \"Ağdaki $AJ (ağsız kum havuzunda)\", \"on-click\": \"/opt/armonia/bin/windows_calistir.sh $K\" },\n" "$DOCK_J"
+    SELEKTORLER="$SELEKTORLER #custom-windows-$K"
+  done
+  if [ -n "$SELEKTORLER" ]; then
+    TEMEL=$(echo $SELEKTORLER | sed 's/ /, /g')
+    HOVER=$(echo $SELEKTORLER | sed 's/\([^ ]*\)/\1:hover/g; s/ /, /g')
+    {
+      echo ""
+      echo "/* ARMONIA-WINDOWS-BASLA (windows_hazirla.sh/pencere-yardimci uretti; elle duzenlemeyin) */"
+      echo "$TEMEL {"
+      echo "  color: #@YAZI@; min-width: 84px; padding: 12px 6px; border-radius: 12px;"
+      echo "}"
+      echo "$HOVER { background-color: #@VURGU_ZEMIN@; }"
+      echo "/* ARMONIA-WINDOWS-BITIS */"
+    } >> "$DOCK_CSS"
+  fi
+  # 3) dock.css.sablon degisti: su anki temadan gercek dock.css'i yeniden uret (digger 4 dosya aynen kalir)
+  TEMA=$(sed -n 's/^TEMA=//p' "$AYAR" 2>/dev/null | head -n1); [ -n "$TEMA" ] || TEMA=armonia
+  [ -x /opt/armonia/bin/tema-yardimci ] && /opt/armonia/bin/tema-yardimci "$TEMA" >/dev/null 2>&1 || true
+  # 4) waybar'a (kullanici oturumunda) yeni dock.jsonc/dock.css'i okumasini soyle
+  pkill -SIGUSR2 waybar >/dev/null 2>&1 || true
+}
+
+desktop_yaz() {  # kimlik ad
+  cat > "$MASAUSTU/armonia-windows-$1.desktop" <<EOT
+[Desktop Entry]
+Type=Application
+Name=$2
+Comment=Ağdaki $2 (Windows programı, ağsız kum havuzunda)
+Exec=/opt/armonia/bin/windows_calistir.sh $1
+Icon=applications-office
+Categories=Office;
+Terminal=false
+EOT
+  chmod 0644 "$MASAUSTU/armonia-windows-$1.desktop"
+}
+
+[ $# -ge 1 ] || { echo "kullanim: pencere-yardimci yaz <kimlik> - | sil <kimlik>" >&2; exit 2; }
+case "$1" in
+  yaz)
+    [ $# -eq 3 ] && [ "$3" = "-" ] || { echo "kullanim: pencere-yardimci yaz <kimlik> -" >&2; exit 2; }
+    KIMLIK=$2; kimlik_dogrula "$KIMLIK"
+    IFS= read -r AD || AD=""
+    IFS= read -r PAYLASIM || PAYLASIM=""
+    IFS= read -r PROGRAM || PROGRAM=""
+    IFS= read -r SHA256 || SHA256=""
+    deger_dogrula AD "$AD"; deger_dogrula PAYLASIM "$PAYLASIM"
+    deger_dogrula PROGRAM "$PROGRAM"; deger_dogrula SHA256 "$SHA256"
+    [ -n "$AD" ] || { echo "AD bos olamaz" >&2; exit 2; }
+    if [ -n "$PAYLASIM" ]; then
+      case "$PAYLASIM" in //[0-9]*.[0-9]*.[0-9]*.[0-9]*/?*) ;; *) echo "gecersiz PAYLASIM: //IP/ad bicimi bekleniyor" >&2; exit 2 ;; esac
+      printf '%s' "$PAYLASIM" | LC_ALL=C grep -q '[^ -~]' && { echo "PAYLASIM ASCII disi karakter icermeli" >&2; exit 2; }
+    fi
+    if [ -n "$PROGRAM" ]; then
+      P=$(printf '%s' "$PROGRAM" | tr '\\' '/')
+      case "$P" in /*|*../*|..*) echo "gecersiz PROGRAM yolu" >&2; exit 2 ;; esac
+    fi
+    SHA256=$(printf '%s' "$SHA256" | tr -cd '0-9a-f')
+    [ -z "$SHA256" ] || [ "${#SHA256}" -eq 64 ] || { echo "SHA256, 64 onaltilik karakter olmali (ya da bos)" >&2; exit 2; }
+
+    install -d -m 0755 "$D"
+    T=$(mktemp "$D/.XXXXXX")
+    printf 'AD="%s"\nPAYLASIM="%s"\nPROGRAM="%s"\nSHA256="%s"\n' "$AD" "$PAYLASIM" "$PROGRAM" "$SHA256" > "$T"
+    chmod 0644 "$T"; mv -f "$T" "$D/$KIMLIK.conf"
+    desktop_yaz "$KIMLIK" "$AD"
+    systemctl enable --now "armonia-paylasim@$KIMLIK.service" >/dev/null 2>&1 || true
+    dock_guncelle
+    echo "kaydedildi: $KIMLIK" ;;
+  sil)
+    [ $# -eq 2 ] || { echo "kullanim: pencere-yardimci sil <kimlik>" >&2; exit 2; }
+    KIMLIK=$2; kimlik_dogrula "$KIMLIK"
+    systemctl disable --now "armonia-paylasim@$KIMLIK.service" >/dev/null 2>&1 || true
+    umount -l "/srv/paylasim/$KIMLIK" 2>/dev/null || true
+    rm -f "$D/$KIMLIK.conf" "$MASAUSTU/armonia-windows-$KIMLIK.desktop"
+    dock_guncelle
+    echo "silindi: $KIMLIK" ;;
+  *) echo "bilinmeyen komut: $1" >&2; exit 2 ;;
+esac

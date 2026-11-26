@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Armonia Dosyalar
+Comment=Dosya yöneticisi
+Exec=/opt/armonia/uygulamalar/armonia-dosyalar
+Icon=system-file-manager
+Categories=System;FileManager;
+Terminal=false

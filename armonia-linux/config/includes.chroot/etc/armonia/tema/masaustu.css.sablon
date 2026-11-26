@@ -1,0 +1,13 @@
+/* Armonia masaustu simgeleri. tema-yardimci uretir (sablon: /etc/armonia/tema/masaustu.css.sablon); elle degistirmeyin. */
+* { font-family: "DejaVu Sans", sans-serif; font-size: 12px; min-height: 0; }
+window#waybar { background: transparent; }
+#custom-m-ev, #custom-m-belgeler, #custom-m-uyap, #custom-m-cop {
+  color: #@YAZI@; min-width: 84px; padding: 52px 6px 8px 6px; border-radius: 12px;
+  background-color: alpha(#@ZEMIN@, 0.85); border: 1px solid #@KENAR@;
+  background-repeat: no-repeat; background-size: 36px 36px; background-position: center 10px;
+}
+#custom-m-ev { background-image: url("/usr/share/armonia/simge/ev.png"); }
+#custom-m-belgeler { background-image: url("/usr/share/armonia/simge/belgeler.png"); }
+#custom-m-uyap { background-image: url("/usr/share/armonia/simge/uyap.png"); }
+#custom-m-cop { background-image: url("/usr/share/armonia/simge/cop.png"); }
+#custom-m-ev:hover, #custom-m-belgeler:hover, #custom-m-uyap:hover, #custom-m-cop:hover { background-color: #@VURGU_ZEMIN@; }

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- Armonia tarayici web filtresi kilidi (tarayici-yardimci). Yalniz etkin yerel oturum, parolasiz polkit —
+     ASIL koruma betigin kendi parola denetimi (openssl passwd hash). tr.armonia.ayar.policy ile ayni desen.
+     Claude, 2026-11-25. -->
+<policyconfig>
+  <vendor>Armonia</vendor>
+  <action id="tr.armonia.tarayici">
+    <description>Armonia tarayici web filtresini ac/kapat</description>
+    <message>Web filtresini değiştirmek için yetki gerekiyor</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/opt/armonia/bin/tarayici-yardimci</annotate>
+  </action>
+</policyconfig>

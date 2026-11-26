@@ -1,7 +1,7 @@
 # Armonia'nin kendi uygulamalari (Rust, egui). Ortak derleme dizini ve kilit dosyasi. Claude, 2026-11-19.
 [workspace]
 resolver = "2"
-members = ["hukuk_hesap", "ayarlar"]
+members = ["hukuk_hesap", "ayarlar", "windows_ayarlari", "dosyalar", "dock"]
 
 [profile.release]
 opt-level = 3

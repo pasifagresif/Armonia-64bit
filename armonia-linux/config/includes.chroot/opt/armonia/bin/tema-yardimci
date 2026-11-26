@@ -26,7 +26,7 @@ done
 case "$K" in koyu) LOGO=logo-koyu ;; *) LOGO=logo ;; esac
 # Ayni anda tek tema degisikligi; ayarlar.conf'a ayar-yardimci ile ayni kilitle yazilir (denetci 23.11 D1)
 exec 9>/run/armonia-ayar.lock; flock 9
-# Once BES dosyanin hepsi gecici olarak uretilir; biri bile basarisizsa hicbiri degismez ve gecici dosyalar
+# Once ALTI dosyanin hepsi gecici olarak uretilir; biri bile basarisizsa hicbiri degismez ve gecici dosyalar
 # silinir (yarim tema kalmaz; denetci 23.11 D2). Sonra hepsi yerine tasinir.
 GECICI=""
 trap 'rm -f $GECICI' EXIT
@@ -43,7 +43,8 @@ uret() {  # sablon hedef
 TASI=""
 uret ust.css.sablon /etc/armonia/waybar/ust.css
 uret dock.css.sablon /etc/armonia/waybar/dock.css
-uret themerc-override.sablon /etc/armonia/labwc/themerc-override
+uret masaustu.css.sablon /etc/armonia/waybar/masaustu.css
+uret themerc-override.sablon /usr/share/themes/Armonia/openbox-3/themerc
 uret fuzzel.ini.sablon /etc/armonia/fuzzel.ini
 uret mako.ini.sablon /etc/armonia/mako.ini
 for c in $TASI; do mv -f "${c%%:*}" "${c#*:}"; done

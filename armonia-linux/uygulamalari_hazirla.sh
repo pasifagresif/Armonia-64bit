@@ -28,7 +28,7 @@ elf_mimari() {  # ELF e_machine (ofset 18, little-endian): 3e00 = x86_64, b700 =
   case "$(od -An -tx1 -j18 -N2 "$1" | tr -d ' \n')" in 3e00) echo x86_64 ;; b700) echo aarch64 ;; *) echo bilinmiyor ;; esac
 }
 install -d -m 0755 "$HEDEF/opt/armonia/uygulamalar"
-for b in armonia-ayarlar hukuk_hesap; do
+for b in armonia-ayarlar hukuk_hesap armonia-windows-ayarlari armonia-dosyalar armonia-dock armonia-one-getir; do
   f="$UYG/target/release/$b"
   [ -f "$f" ] || { echo "HATA: $f yok (cargo build --release --workspace)"; exit 6; }
   m=$(elf_mimari "$f")

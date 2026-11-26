@@ -57,6 +57,8 @@ pub mod guncelleme;
 pub mod yazi_sunucu;
 #[cfg(windows)]
 pub mod tepsi;
+#[cfg(target_os = "linux")]
+pub mod linux_gosterge;
 pub mod is_listesi;
 pub mod is_otomatik;
 pub mod icra_tebligatlar;

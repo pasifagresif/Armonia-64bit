@@ -24,10 +24,15 @@ chmod 0755 /opt/armonia/bin/*.sh
 chmod -R go-w /opt/armonia /etc/armonia /etc/systemd/system/armonia-*.service /etc/NetworkManager/conf.d
 chmod 0755 /opt/armonia/bin/ayar-yardimci /opt/armonia/bin/tema-yardimci
 # Tema (23.11): renk dosyalari (waybar, labwc, fuzzel, mako) sablondan uretilir; varsayilan Armonia
+# labwc'nin pencere/menu temasi /usr/share/themes/<ad>/openbox-3/themerc'te aranir (rc.xml <theme><name>Armonia</name>);
+# /etc/armonia/labwc/themerc-override eskiden labwc'nin HICBIR ZAMAN OKUMADIGI bir yoldu (pencere tema degisince
+# guncellenmiyordu kokeni budur, denetci 25.11).
+install -d -m 0755 /usr/share/themes/Armonia/openbox-3
 /opt/armonia/bin/tema-yardimci armonia
-for f in waybar/ust.css waybar/dock.css labwc/themerc-override fuzzel.ini mako.ini; do
+for f in waybar/ust.css waybar/dock.css waybar/masaustu.css fuzzel.ini mako.ini; do
   [ -s "/etc/armonia/$f" ] || { echo "HATA: tema dosyasi uretilmedi: $f"; exit 1; }
 done
+[ -s /usr/share/themes/Armonia/openbox-3/themerc ] || { echo "HATA: labwc tema dosyasi uretilmedi"; exit 1; }
 # Denetim: kok dosya sisteminde herkese-yazilabilir dosya kalmasin (sticky /tmp haric)
 if find / -xdev -type f -perm -0002 2>/dev/null | grep -q .; then
   echo "UYARI: herkese-yazilabilir dosyalar:"; find / -xdev -type f -perm -0002 2>/dev/null | head
@@ -90,9 +95,7 @@ if [ -d /etc/usbguard ]; then
   grep -q '^# Armonia kurallari sonu$' /etc/usbguard/rules.conf && grep -q '^# Armonia USBGuard servis ayari' /etc/usbguard/usbguard-daemon.conf \
     || { echo "HATA: usbguard ayarlari Armonia surumu degil (paket uzerine yazmis olabilir)"; exit 1; }
 fi
-# Oturum kum havuzunda degil (denetci 19.11 Y1): komut calistirma kapilari kapatilir.
-# Thunar "Ozel Eylemler" (uca) eklentisi her komutu calistirabilir -> kaldirilir.
-rm -f /usr/lib/*/thunarx-3/thunar-uca.so
+# (19.11: Thunar "Ozel Eylemler" eklentisi icin buradaydi; Thunar kaldirildi, Armonia Dosyalar kullaniliyor.)
 # LibreOffice makrolari kapali ve kilitli: /usr/lib/libreoffice/share/registry/armonia.xcd (includes.chroot)
 [ -f /usr/lib/libreoffice/share/registry/armonia.xcd ] || { echo "HATA: LibreOffice makro kilidi yok"; exit 1; }
 # greetd: paket kendi config.toml'unu (vt7, /bin/sh) yazmis olabilir; Armonia surumu olmali

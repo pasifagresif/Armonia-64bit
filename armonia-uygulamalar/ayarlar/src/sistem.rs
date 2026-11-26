@@ -19,13 +19,19 @@ pub fn ayar_coz(metin: &str) -> BTreeMap<String, String> {
         .lines()
         .filter(|l| !l.trim_start().starts_with('#'))
         .filter_map(|l| l.split_once('='))
-        .filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit()))
+        .filter(|(k, _)| {
+            !k.is_empty()
+                && k.chars()
+                    .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+        })
         .map(|(k, v)| (k.to_string(), v.trim().to_string()))
         .collect()
 }
 
 pub fn ayarlar() -> BTreeMap<String, String> {
-    std::fs::read_to_string(AYAR_DOSYASI).map(|m| ayar_coz(&m)).unwrap_or_default()
+    std::fs::read_to_string(AYAR_DOSYASI)
+        .map(|m| ayar_coz(&m))
+        .unwrap_or_default()
 }
 
 fn calistir(program: &str, argumanlar: &[&str]) -> Result<String, String> {
@@ -38,7 +44,11 @@ fn calistir(program: &str, argumanlar: &[&str]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&c.stdout).into_owned())
     } else {
         let hata = String::from_utf8_lossy(&c.stderr).trim().to_string();
-        Err(if hata.is_empty() { format!("{program} başarısız ({})", c.status) } else { hata })
+        Err(if hata.is_empty() {
+            format!("{program} başarısız ({})", c.status)
+        } else {
+            hata
+        })
     }
 }
 
@@ -47,9 +57,17 @@ pub fn yardimci(komut: &str, deger: &str) -> Result<(), String> {
     calistir("pkexec", &[YARDIMCI, komut, deger]).map(|_| ())
 }
 
-/// labwc ayarlarını (klavye düzeni dahil) yeniden okur.
+/// labwc ayarlarını (tema, klavye düzeni dahil) yeniden okur. İsim bazlı SIGHUP gönderir — `labwc
+/// --reconfigure` KULLANILMAZ: o komut `LABWC_PID` ortam değişkenine bağlı (labwc'nin kendi man sayfası:
+/// "--reconfigure" bu değişkeni okuyup sinyali ona gönderir) ve bu değişken çağıran sürece (pkexec/fuzzel/
+/// systemd --user zinciri) her zaman aktarılmayabilir — aktarılmazsa komut sessizce hiçbir şey yapmaz.
+/// Bu, "tema değişince pencere dekorasyonunun eski renkte kalması" hatasının kök nedeniydi (24.11.2026):
+/// waybar reload'u isim bazlı (`pkill -USR2 -x waybar`) olduğu için çalışıyordu, labwc'ninki değildi.
+///
+/// Sinyal SAYIYLA verilir: procps-ng 4.0.4'te (Debian 13) `pkill -HUP`, yeni `-H` seçeneği yüzünden
+/// `-H -U P` diye ayrıştırılıp "invalid user name: P" ile çıkıyor, sinyal hiç gitmiyordu (imajda doğrulandı).
 pub fn labwc_yenile() {
-    let _ = calistir("labwc", &["--reconfigure"]);
+    let _ = calistir("pkill", &["--signal", "1", "-x", "labwc"]);
 }
 
 /// Üst çubuktaki klavye hapını yeniler (waybar `signal: 8`).
@@ -78,7 +96,10 @@ pub struct Yazici {
 
 /// `lpstat -v`, `lpstat -p`, `lpstat -d` çıktılarından yazıcı listesi (LANG=C ile çalıştırılır).
 pub fn yazicilari_coz(v: &str, p: &str, d: &str) -> Vec<Yazici> {
-    let varsayilan = d.lines().find_map(|l| l.strip_prefix("system default destination: ")).map(str::trim);
+    let varsayilan = d
+        .lines()
+        .find_map(|l| l.strip_prefix("system default destination: "))
+        .map(str::trim);
     v.lines()
         .filter_map(|l| l.strip_prefix("device for "))
         .filter_map(|l| l.split_once(": "))
@@ -97,7 +118,12 @@ pub fn yazicilari_coz(v: &str, p: &str, d: &str) -> Vec<Yazici> {
                 })
                 .unwrap_or("Bilinmiyor")
                 .to_string();
-            Yazici { ad: ad.to_string(), adres: adres.trim().to_string(), durum, varsayilan: varsayilan == Some(ad) }
+            Yazici {
+                ad: ad.to_string(),
+                adres: adres.trim().to_string(),
+                durum,
+                varsayilan: varsayilan == Some(ad),
+            }
         })
         .collect()
 }
@@ -116,7 +142,17 @@ pub fn yazicilar() -> Result<Vec<Yazici>, String> {
 }
 
 pub fn deneme_sayfasi(ad: &str) -> Result<(), String> {
-    calistir("lp", &["-d", ad, "-t", "Armonia deneme sayfası", "/usr/share/cups/data/testprint"]).map(|_| ())
+    calistir(
+        "lp",
+        &[
+            "-d",
+            ad,
+            "-t",
+            "Armonia deneme sayfası",
+            "/usr/share/cups/data/testprint",
+        ],
+    )
+    .map(|_| ())
 }
 
 /// Adres metnini kullanıcıya anlaşılır yazar.
@@ -141,13 +177,22 @@ pub struct Bilgi {
 
 /// /proc/meminfo "MemTotal:  8000000 kB" → "7,6 GB"
 pub fn bellek_coz(meminfo: &str) -> Option<String> {
-    let kb: f64 = meminfo.lines().find_map(|l| l.strip_prefix("MemTotal:"))?.split_whitespace().next()?.parse().ok()?;
+    let kb: f64 = meminfo
+        .lines()
+        .find_map(|l| l.strip_prefix("MemTotal:"))?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
     Some(format!("{:.1} GB", kb / 1024.0 / 1024.0).replace('.', ","))
 }
 
 pub fn bilgi() -> Bilgi {
     let os = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-    let ad = ayar_coz(&os.replace('"', "")).get("PRETTY_NAME").cloned().unwrap_or_else(|| "bilinmiyor".into());
+    let ad = ayar_coz(&os.replace('"', ""))
+        .get("PRETTY_NAME")
+        .cloned()
+        .unwrap_or_else(|| "bilinmiyor".into());
     let islemci = std::fs::read_to_string("/proc/cpuinfo")
         .ok()
         .and_then(|c| {
@@ -159,12 +204,25 @@ pub fn bilgi() -> Bilgi {
         .unwrap_or_else(|| std::env::consts::ARCH.to_string());
     let disk = calistir("df", &["-h", "--output=size,avail", "/"])
         .ok()
-        .and_then(|m| m.lines().nth(1).map(|l| l.split_whitespace().collect::<Vec<_>>().join(" / boş ")))
+        .and_then(|m| {
+            m.lines()
+                .nth(1)
+                .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" / boş "))
+        })
         .unwrap_or_default();
     Bilgi {
-        sistem: format!("Armonia ({ad}){}", if canli() { " — canlı (deneme)" } else { "" }),
-        cekirdek: calistir("uname", &["-r"]).unwrap_or_default().trim().to_string(),
-        bellek: std::fs::read_to_string("/proc/meminfo").ok().and_then(|m| bellek_coz(&m)).unwrap_or_default(),
+        sistem: format!(
+            "Armonia ({ad}){}",
+            if canli() { " — canlı (deneme)" } else { "" }
+        ),
+        cekirdek: calistir("uname", &["-r"])
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        bellek: std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|m| bellek_coz(&m))
+            .unwrap_or_default(),
         disk,
         islemci,
     }
@@ -215,7 +273,12 @@ pub fn wifi_coz(m: &str) -> Vec<WifiAgi> {
         } else {
             continue; // WEP / kurumsal (802.1X): desteklenmiyor
         };
-        let ag = WifiAgi { ssid: a[1].clone(), sinyal: a[2].parse().unwrap_or(0), guvenlik, bagli: a[0] == "*" };
+        let ag = WifiAgi {
+            ssid: a[1].clone(),
+            sinyal: a[2].parse().unwrap_or(0),
+            guvenlik,
+            bagli: a[0] == "*",
+        };
         match v.iter_mut().find(|x| x.ssid == ag.ssid) {
             Some(x) => {
                 x.bagli |= ag.bagli;
@@ -229,7 +292,19 @@ pub fn wifi_coz(m: &str) -> Vec<WifiAgi> {
 }
 
 pub fn wifi_tara() -> Result<Vec<WifiAgi>, String> {
-    let m = calistir("nmcli", &["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "yes"])?;
+    let m = calistir(
+        "nmcli",
+        &[
+            "-t",
+            "-f",
+            "IN-USE,SSID,SIGNAL,SECURITY",
+            "device",
+            "wifi",
+            "list",
+            "--rescan",
+            "yes",
+        ],
+    )?;
     Ok(wifi_coz(&m))
 }
 
@@ -243,7 +318,10 @@ pub struct AgDurumu {
 
 /// `nmcli -t -f TYPE,STATE,CONNECTION device`
 pub fn ag_durumu_coz(m: &str, radyo: &str) -> AgDurumu {
-    let mut d = AgDurumu { wifi_acik: radyo.trim() == "enabled", ..Default::default() };
+    let mut d = AgDurumu {
+        wifi_acik: radyo.trim() == "enabled",
+        ..Default::default()
+    };
     for l in m.lines() {
         let a = nmcli_alanlar(l);
         if a.len() < 3 {
@@ -276,15 +354,18 @@ pub fn wifi_radyo(acik: bool) -> Result<(), String> {
 
 /// Kayıtlı Wi-Fi ağları: (ad, uuid)
 pub fn kayitli_wifi() -> Vec<(String, String)> {
-    calistir("nmcli", &["-t", "-f", "NAME,UUID,TYPE", "connection", "show"])
-        .map(|m| {
-            m.lines()
-                .map(nmcli_alanlar)
-                .filter(|a| a.len() >= 3 && a[2] == "802-11-wireless")
-                .map(|a| (a[0].clone(), a[1].clone()))
-                .collect()
-        })
-        .unwrap_or_default()
+    calistir(
+        "nmcli",
+        &["-t", "-f", "NAME,UUID,TYPE", "connection", "show"],
+    )
+    .map(|m| {
+        m.lines()
+            .map(nmcli_alanlar)
+            .filter(|a| a.len() >= 3 && a[2] == "802-11-wireless")
+            .map(|a| (a[0].clone(), a[1].clone()))
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 pub fn kayitliya_baglan(uuid: &str) -> Result<(), String> {
@@ -333,7 +414,10 @@ pub fn armonia_temasi() -> Tema {
     Tema {
         kimlik: "armonia".into(),
         ad: "Armonia".into(),
-        renk: [0xF3EEE6, 0xFCFAF6, 0x2F2F2F, 0xE2DACB, 0xECE6DB, 0x7C9A7E, 0x5F7A61, 0xE6EBE3, 0xD8CFC0, 0xFAF8F4],
+        renk: [
+            0xF3EEE6, 0xFCFAF6, 0x2F2F2F, 0xE2DACB, 0xECE6DB, 0x7C9A7E, 0x5F7A61, 0xE6EBE3,
+            0xD8CFC0, 0xFAF8F4,
+        ],
     }
 }
 
@@ -354,14 +438,24 @@ pub fn palet_coz(metin: &str) -> Vec<Tema> {
                 }
                 renk[i] = u32::from_str_radix(h, 16).ok()?;
             }
-            Some(Tema { kimlik: a[0].to_string(), ad: a[1].to_string(), renk })
+            Some(Tema {
+                kimlik: a[0].to_string(),
+                ad: a[1].to_string(),
+                renk,
+            })
         })
         .collect()
 }
 
 pub fn temalar() -> Vec<Tema> {
-    let l = std::fs::read_to_string(PALET_DOSYASI).map(|m| palet_coz(&m)).unwrap_or_default();
-    if l.is_empty() { vec![armonia_temasi()] } else { l }
+    let l = std::fs::read_to_string(PALET_DOSYASI)
+        .map(|m| palet_coz(&m))
+        .unwrap_or_default();
+    if l.is_empty() {
+        vec![armonia_temasi()]
+    } else {
+        l
+    }
 }
 
 /// Root tema yardımcısı (polkit tr.armonia.tema: parolasız, yalnız izin listesindeki tema adı).
@@ -369,16 +463,82 @@ pub fn tema_uygula(kimlik: &str) -> Result<(), String> {
     calistir("pkexec", &[TEMA_YARDIMCI, kimlik]).map(|_| ())
 }
 
-/// Yeni renk dosyalarını oturuma okutur: waybar (SIGUSR2 = yeniden yükle), labwc (çerçeve), mako (bildirim).
-/// fuzzel her açılışta okur.
+/// Yeni renk dosyalarını oturuma okutur: waybar (SIGUSR2 = yeniden yükle), labwc (bkz. labwc_yenile()),
+/// mako (bildirim). fuzzel her açılışta okur.
 pub fn tema_yenile() {
     let _ = calistir("pkill", &["-USR2", "-x", "waybar"]);
-    let _ = calistir("labwc", &["--reconfigure"]);
+    labwc_yenile();
     let _ = calistir("makoctl", &["reload"]);
 }
 
 // Çoklu UYAP temayı başlarken kendisi alır (cokluuyap_calistir.sh, ayarlar.conf TEMA=). Ayarlar kum havuzunun
 // veri klasörüne YAZMAZ: oradaki bir sembolik bağ havuz dışındaki dosyayı ezdirebilirdi (denetçi 23.11 O1).
+
+// ── Tarayıcı web filtresi (25.11.2026) ──────────────────────────────────────────────────────────────
+// Koruma, polkit'in kendisinde değil tarayici-yardimci'nin KENDİ parola denetiminde (openssl passwd hash);
+// polkit burada da (ayar-yardimci/tema-yardimci gibi) yalnız "etkin yerel oturum" kontrolü, parolasız.
+pub const TARAYICI_YARDIMCI: &str = "/opt/armonia/bin/tarayici-yardimci";
+/// Kilit açıkken bu dosya var olur (root:root 0600); içeriğini okuyamayız ama VARLIĞINI normal kullanıcı
+/// olarak da görebiliriz (üst dizinler 0755) — pkexec'e gerek yok, ekranda hızlı durum göstergesi için.
+const TARAYICI_YEDEK: &str = "/etc/armonia/tarayici_kilitli_yedek.json";
+
+pub fn tarayici_acik_mi() -> bool {
+    Path::new(TARAYICI_YEDEK).exists()
+}
+
+/// Parola belirler/değiştirir. İlk kurulumda `eski` boş geçilir. Parola komut satırına değil yardımcının
+/// standart girişine yazılır (wifi_baglan ile aynı desen).
+pub fn tarayici_parola_belirle(eski: &str, yeni: &str) -> Result<(), String> {
+    use std::io::Write;
+    if eski.contains('\n') || yeni.contains('\n') {
+        return Err("Geçersiz karakter".into());
+    }
+    let mut c = Command::new("pkexec")
+        .args([TARAYICI_YARDIMCI, "parola-belirle", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pkexec çalıştırılamadı: {e}"))?;
+    if let Some(mut g) = c.stdin.take() {
+        let _ = write!(g, "{eski}\n{yeni}\n");
+    }
+    let c = c.wait_with_output().map_err(|e| e.to_string())?;
+    if c.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&c.stderr).trim().to_string())
+    }
+}
+
+/// Filtreyi `dakika` dakikalığına açar (parola doğruysa); süre sonunda kendiliğinden kilitlenir.
+pub fn tarayici_ac(dakika: u32, parola: &str) -> Result<(), String> {
+    use std::io::Write;
+    if parola.contains('\n') {
+        return Err("Geçersiz karakter".into());
+    }
+    let mut c = Command::new("pkexec")
+        .args([TARAYICI_YARDIMCI, "ac", &dakika.to_string(), "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("pkexec çalıştırılamadı: {e}"))?;
+    if let Some(mut g) = c.stdin.take() {
+        let _ = writeln!(g, "{parola}");
+    }
+    let c = c.wait_with_output().map_err(|e| e.to_string())?;
+    if c.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&c.stderr).trim().to_string())
+    }
+}
+
+/// Filtreyi hemen geri kilitler (parola gerekmez: herkes kısıtlamayı artırabilir).
+pub fn tarayici_kilitle() -> Result<(), String> {
+    calistir("pkexec", &[TARAYICI_YARDIMCI, "kilitle"]).map(|_| ())
+}
 
 #[cfg(test)]
 mod testler {
@@ -399,9 +559,24 @@ mod testler {
     /// Depodaki paletler dosyası: 9 tema, ilki Armonia (varsayılanla aynı), Çoklu UYAP kimlikleriyle uyumlu.
     #[test]
     fn depodaki_paletler() {
-        let t = palet_coz(include_str!("../../../armonia-linux/config/includes.chroot/etc/armonia/tema/paletler"));
+        let t = palet_coz(include_str!(
+            "../../../armonia-linux/config/includes.chroot/etc/armonia/tema/paletler"
+        ));
         let k: Vec<&str> = t.iter().map(|x| x.kimlik.as_str()).collect();
-        assert_eq!(k, ["armonia", "gul", "okyanus", "lavanta", "gunbatimi", "gunes", "grafit", "uyap", "koyu"]);
+        assert_eq!(
+            k,
+            [
+                "armonia",
+                "gul",
+                "okyanus",
+                "lavanta",
+                "gunbatimi",
+                "gunes",
+                "grafit",
+                "uyap",
+                "koyu"
+            ]
+        );
         assert_eq!(t[0], armonia_temasi());
     }
 
@@ -420,7 +595,15 @@ mod testler {
         let d = "system default destination: HP_LaserJet\n";
         let y = yazicilari_coz(v, p, d);
         assert_eq!(y.len(), 2);
-        assert_eq!(y[0], Yazici { ad: "HP_LaserJet".into(), adres: "ipp://localhost:60000/ipp/print".into(), durum: "Hazır".into(), varsayilan: true });
+        assert_eq!(
+            y[0],
+            Yazici {
+                ad: "HP_LaserJet".into(),
+                adres: "ipp://localhost:60000/ipp/print".into(),
+                durum: "Hazır".into(),
+                varsayilan: true
+            }
+        );
         assert_eq!(y[1].durum, "Kapalı");
         assert!(!y[1].varsayilan);
         assert_eq!(baglanti_turu(&y[0].adres), "USB (sürücüsüz)");
@@ -429,10 +612,21 @@ mod testler {
 
     #[test]
     fn nmcli() {
-        assert_eq!(nmcli_alanlar(r"*:Ev\:Agi:70:WPA2"), vec!["*", "Ev:Agi", "70", "WPA2"]);
+        assert_eq!(
+            nmcli_alanlar(r"*:Ev\:Agi:70:WPA2"),
+            vec!["*", "Ev:Agi", "70", "WPA2"]
+        );
         let l = wifi_coz("*:Ofis:80:WPA2\n :Ofis:60:WPA2\n :Kafe:90:\n :Yeni:50:WPA3\n :Eski:40:WEP\n ::30:WPA2\n");
         assert_eq!(l.len(), 3); // Ofis (tek), Kafe, Yeni; WEP ve gizli ag atlanir
-        assert_eq!(l[0], WifiAgi { ssid: "Ofis".into(), sinyal: 80, guvenlik: "psk", bagli: true });
+        assert_eq!(
+            l[0],
+            WifiAgi {
+                ssid: "Ofis".into(),
+                sinyal: 80,
+                guvenlik: "psk",
+                bagli: true
+            }
+        );
         assert_eq!(l[1].ssid, "Kafe");
         assert_eq!(l[1].guvenlik, "acik");
         assert_eq!(l.iter().find(|a| a.ssid == "Yeni").unwrap().guvenlik, "sae");
@@ -443,7 +637,10 @@ mod testler {
 
     #[test]
     fn bellek() {
-        assert_eq!(bellek_coz("MemTotal:        8122408 kB\nMemFree: 1 kB").as_deref(), Some("7,7 GB"));
+        assert_eq!(
+            bellek_coz("MemTotal:        8122408 kB\nMemFree: 1 kB").as_deref(),
+            Some("7,7 GB")
+        );
         assert_eq!(bellek_coz("yok"), None);
     }
 }

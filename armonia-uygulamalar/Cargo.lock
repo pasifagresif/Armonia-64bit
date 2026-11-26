@@ -99,6 +99,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "armonia_dock"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "smithay-client-toolkit 0.19.2",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+]
+
+[[package]]
+name = "armonia_dosyalar"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+]
+
+[[package]]
+name = "armonia_windows_ayarlari"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+]
+
+[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

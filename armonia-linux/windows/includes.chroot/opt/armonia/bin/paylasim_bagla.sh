@@ -1,10 +1,14 @@
 #!/bin/sh
-# Agdaki Windows program klasorunu (/etc/armonia/windows.conf PAYLASIM) root olarak baglar; ag gelene kadar
-# 15 sn arayla dener. armonia-paylasim.service calistirir. Claude, 2026-11-23.
+# Agdaki Windows program klasorunu ($1 = uygulama kimligi, /etc/armonia/windows.apps.d/$1.conf PAYLASIM) root
+# olarak baglar; ag gelene kadar 15 sn arayla dener. armonia-paylasim@<kimlik>.service calistirir.
+# Claude, 2026-11-23 (tek uygulama); 2026-11-25 (coklu uygulama: $1 = kimlik).
 # Kullanici karari 23.11: paylasim parolasiz (misafir). Kullanici surecleri baglama yapamaz (mount.cifs setuid degil).
 set -u
-KONF=/etc/armonia/windows.conf
-HEDEF=/srv/paylasim/windows
+KIMLIK=${1:?kullanim: paylasim_bagla.sh <kimlik>}
+case "$KIMLIK" in [a-z0-9_-]*) ;; *) echo "gecersiz kimlik: $KIMLIK"; exit 1 ;; esac
+KONF="/etc/armonia/windows.apps.d/$KIMLIK.conf"
+[ -f "$KONF" ] || { echo "tanim yok: $KONF"; exit 0; }
+HEDEF="/srv/paylasim/$KIMLIK"
 oku() { sed -n "s/^$1=\"\(.*\)\"\$/\1/p" "$KONF" | head -n1; }
 PAYLASIM=$(oku PAYLASIM)
 [ -n "$PAYLASIM" ] || { echo "paylasim ayarlanmamis ($KONF)"; exit 0; }
@@ -24,14 +28,15 @@ install -d -m 0770 -o root -g armonia "$HEDEF"
 # username=guest,password= : misafir kimligi acikca (yalniz 'guest' secenegi root adiyla gidebilir; denetci B-4).
 SECENEK="username=guest,password=,uid=$KUID,gid=$KGID,forceuid,forcegid,file_mode=0660,dir_mode=0770,nosuid,nodev,noserverino"
 # Hata dosyasi /tmp'de degil, servisin kendi calisma dizininde (denetci B-5: /tmp'de onceden olusturulan dosya engeller)
-HATA="${RUNTIME_DIRECTORY:-/run/armonia-paylasim}/hata"
+HATA="${RUNTIME_DIRECTORY:-/run/armonia-paylasim-$KIMLIK}/hata"
+mkdir -p "$(dirname "$HATA")"
 until mountpoint -q "$HEDEF"; do
   # Sunucuda Guest hesabi kapali ama anonim erisim aciksa ikinci deneme sec=none (denetci D-4)
   if mount -t cifs "$PAYLASIM" "$HEDEF" -o "$SECENEK" 2>"$HATA" \
      || mount -t cifs "$PAYLASIM" "$HEDEF" -o "sec=none,${SECENEK#username=guest,password=,}" 2>>"$HATA"; then
-    echo "baglandi: $PAYLASIM -> $HEDEF ($(findmnt -n -o OPTIONS "$HEDEF" | grep -o 'vers=[^,]*'))"
+    echo "baglandi ($KIMLIK): $PAYLASIM -> $HEDEF ($(findmnt -n -o OPTIONS "$HEDEF" | grep -o 'vers=[^,]*'))"
     break
   fi
-  echo "baglanamadi ($(head -c 200 "$HATA")); 15 sn sonra yeniden"
+  echo "baglanamadi ($KIMLIK, $(head -c 200 "$HATA")); 15 sn sonra yeniden"
   sleep 15
 done

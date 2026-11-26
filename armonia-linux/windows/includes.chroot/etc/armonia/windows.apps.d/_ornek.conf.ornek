@@ -1,4 +1,11 @@
-# Armonia Windows katmani ayari (ISO, WINDOWS=1). DERLEMEDEN ONCE doldurun. Claude, 2026-11-23.
+# Armonia Windows katmani: BIR uygulama tanimi. Claude, 2026-11-25 (coklu uygulama genellestirmesi).
+# Bu dosya ORNEKTIR: uzantisi ".conf.ornek" oldugu icin windows_hazirla.sh ve calisma zamani betikleri
+# onu OKUMAZ. Gercek bir uygulama eklemek icin bu dosyayi BURAYA, adi ".conf" ile bitecek sekilde
+# kopyalayin (ornek: icramatik.conf). Dosya adi (uzantisiz) o uygulamanin KIMLIGI (ID) olur:
+#   - yalniz kucuk harf, rakam, '-' ve '_' (sistemd birim adi ve dock kimligi olarak kullanilir)
+#   - ayni kimlikle iki dosya olamaz (dosya sistemi zaten tekilligi saglar)
+# Armonia Ayarlar'in "Windows programlari" bolumunden de eklenebilir/duzenlenebilir (pencere-yardimci).
+#
 # Yalniz KEY="deger" satirlari okunur (dosya kaynak olarak calistirilmaz).
 
 # Agdaki paylasim klasoru (parolasiz/misafir, kullanici karari 23.11). Bicim: //IP/PAYLASIM
@@ -10,7 +17,7 @@ PAYLASIM=""
 PROGRAM=""
 
 # PROGRAM BUTUNLUGU. Paylasim parolasiz: LAN'daki herkes program dosyalarini degistirebilir.
-# EN IYISI: /etc/armonia/windows.sha256 listesi (bu dosyanin yaninda; derlemede windows/includes.chroot/etc/armonia/).
+# EN IYISI: /etc/armonia/windows.apps.d/<kimlik>.sha256 listesi (bu dosyanin yaninda).
 #   Program klasorunde (Linux'ta) uretilir:
 #     find . -maxdepth 3 -type f \( -iname '*.exe' -o -iname '*.dll' -o -iname '*.ocx' -o -iname '*.bpl' \
 #       -o -iname '*.cpl' -o -iname '*.drv' -o -iname '*.sys' -o -iname '*.ax' \) -printf '%P\0' | xargs -0 sha256sum
@@ -20,5 +27,5 @@ PROGRAM=""
 # Program guncellenince ikisi de yenilenmeli.
 SHA256=""
 
-# Dock ve bildirimlerde gorunen ad
-AD="İcramatik"
+# Dock ve bildirimlerde gorunen ad (ornek: "İcramatik")
+AD=""

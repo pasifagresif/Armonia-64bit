@@ -6,7 +6,7 @@
     <xwaylandPersistence>no</xwaylandPersistence>
   </core>
   <theme>
-    <name></name>
+    <name>Armonia</name>
     <cornerRadius>8</cornerRadius>
     <font place="ActiveWindow"><name>DejaVu Sans</name><size>10</size><weight>bold</weight></font>
     <font place="InactiveWindow"><name>DejaVu Sans</name><size>10</size></font>
@@ -33,10 +33,10 @@
   </keyboard>
   <mouse>
     <default/>
-    <!-- Masaustune tik: menu yok (simge yok, widget'lar sonraki asamada) -->
+    <!-- Masaustune sag tik: menu.xml'deki kisa menu (26.11); sol/orta tik bir sey yapmaz -->
     <context name="Root">
       <mousebind button="Left" action="Press"><action name="None"/></mousebind>
-      <mousebind button="Right" action="Press"><action name="None"/></mousebind>
+      <mousebind button="Right" action="Press"><action name="ShowMenu" menu="root-menu"/></mousebind>
       <mousebind button="Middle" action="Press"><action name="None"/></mousebind>
     </context>
   </mouse>

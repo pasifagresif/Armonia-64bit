@@ -1,7 +1,28 @@
 # Armonia masaustu bilesenleri (labwc acilinca bir kez). Claude, 2026-11-19.
 swaybg -m fill -i /usr/share/armonia/duvar.png -c '#F3EEE6' >/dev/null 2>&1 &
-waybar -c /etc/armonia/waybar/ust.jsonc -s /etc/armonia/waybar/ust.css >/dev/null 2>&1 &
-waybar -c /etc/armonia/waybar/dock.jsonc -s /etc/armonia/waybar/dock.css >/dev/null 2>&1 &
+# waybar: tema degisince SIGUSR2 ile yeniden yuklenir. Bilinen waybar hatasi (Ubuntu LP#2006053): bazi
+# config'lerle SIGUSR2/yeniden yukleme sirasinda yakalanmamis exception ile COKEBILIYOR; cokerse geri
+# donmuyordu (ust cubuk tamamen kayboluyordu, kullanici bildirimi 25.11). lxpolkit gibi coker-baslar
+# dongusune alindi: cokerse ~1 sn icinde kendiliginden yeniden baslar, GUNCEL config dosyalarini okur.
+( while [ -S "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}" ]; do
+    waybar -c /etc/armonia/waybar/ust.jsonc -s /etc/armonia/waybar/ust.css >/dev/null 2>&1
+    sleep 1
+  done ) &
+# Dock: armonia-dock bekcisi waybar dock'unu kendisi baslatir/durdurur (pencere aciksa gizli, fare alt kenara
+# gelince gorunur; 26.11). Bekci yoksa/calismiyorsa eski davranis: dock surekli gorunur.
+( while [ -S "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}" ]; do
+    if [ -x /opt/armonia/uygulamalar/armonia-dock ]; then
+      /opt/armonia/uygulamalar/armonia-dock >/dev/null 2>&1
+    else
+      waybar -c /etc/armonia/waybar/dock.jsonc -s /etc/armonia/waybar/dock.css >/dev/null 2>&1
+    fi
+    sleep 1
+  done ) &
+# Masaustu simgeleri (Ev, Belgeler, UYAP): ucuncu waybar, "bottom" katmaninda (26.11)
+( while [ -S "$XDG_RUNTIME_DIR/${WAYLAND_DISPLAY:-wayland-0}" ]; do
+    waybar -c /etc/armonia/waybar/masaustu.jsonc -s /etc/armonia/waybar/masaustu.css >/dev/null 2>&1
+    sleep 1
+  done ) &
 mako -c /etc/armonia/mako.ini >/dev/null 2>&1 &
 /opt/armonia/bin/bosta.sh >/dev/null 2>&1 &
 # Polkit parola penceresi (G3, 23.11). Canli ISO'da politika parola istemez, pencere bosta bekler.

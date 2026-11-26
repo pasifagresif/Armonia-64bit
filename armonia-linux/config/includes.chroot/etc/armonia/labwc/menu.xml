@@ -1,3 +1,13 @@
 <?xml version="1.0"?>
-<!-- Bos kok menu: masaustune sag tik menu acmaz. Pencere menusu (baslik) labwc varsayilani. Claude, 2026-11-14. -->
-<openbox_menu><menu id="root-menu" label=""></menu></openbox_menu>
+<!-- Masaustu sag tik menusu (kullanici istegi 25.11). Yalniz Armonia'nin kendi programlari: terminal, cikis,
+     yapilandirma yok (rc.xml'deki sinirla ayni cizgi). Pencere menusu (baslik) labwc varsayilani.
+     Claude, 2026-11-14 (bos), 2026-11-26 (ogeler). -->
+<openbox_menu>
+  <menu id="root-menu" label="">
+    <item label="Dosyalar"><action name="Execute" command="/opt/armonia/uygulamalar/armonia-dosyalar"/></item>
+    <item label="Belgeler"><action name="Execute" command="sh -c 'exec /opt/armonia/uygulamalar/armonia-dosyalar &quot;$HOME/Belgeler&quot;'"/></item>
+    <separator/>
+    <item label="Tüm programlar"><action name="Execute" command="/opt/armonia/bin/menu.sh"/></item>
+    <item label="Ayarlar"><action name="Execute" command="/opt/armonia/uygulamalar/armonia-ayarlar"/></item>
+  </menu>
+</openbox_menu>

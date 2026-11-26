@@ -23,9 +23,8 @@ wlr-randr
 adwaita-icon-theme
 xdg-user-dirs
 locales
-# Dosya yöneticisi, PDF, ofis
-thunar
-# USB bellek: izin verilince Thunar'da gorunur ve baglanir (nosuid,nodev; polkit: etkin yerel oturum)
+# Dosya yoneticisi (Armonia Dosyalar, kendi egui uygulamamiz - /opt/armonia/uygulamalar/), PDF, ofis.
+# USB bellek: izin verilince Armonia Dosyalar'da gorunur ve baglanir (nosuid,nodev; polkit: etkin yerel oturum)
 udisks2
 gvfs
 # Yazdirma: yalniz surucusuz yol imajda (IPP Everywhere / IPP-over-USB). Surucu paketleri IMAJA KONMAZ
@@ -38,7 +37,9 @@ ipp-usb
 # Donanim -> paket eslemesi (Debian): surucu.sh ve kurulumdaki surucu secimi kullanir
 isenkram-cli
 evince
-libreoffice-writer
+# Resim goruntuleyici (Armonia Dosyalar'in cift-tik actigi): Wayland yerel, hafif
+imv
+# Writer yok: Armonia Yazı (udf/docx) onun yerini tutuyor; Calc'in hafif karsiligi yok, kaliyor (kullanici karari 25.11)
 libreoffice-calc
 libreoffice-gtk3
 libreoffice-l10n-tr
@@ -61,6 +62,8 @@ network-manager
 wpasupplicant
 systemd-resolved
 ca-certificates
+# tarayici-yardimci (web filtresi parola kilidi): openssl passwd ile parola ozeti/dogrulama
+openssl
 # Guvenlik duvari (Faz 3)
 nftables
 # Disk şifreleme (diske kurulum, A6)

@@ -10,6 +10,9 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(unix)]
+mod tek_ornek;
+
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -19,7 +22,6 @@ use std::sync::Mutex;
 use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri_plugin_dialog::DialogExt;
 
 /// Açılabilecek en büyük dosya (çekirdeğin sınırıyla aynı)
 const AZAMI: u64 = 64 << 20;
@@ -36,9 +38,14 @@ struct Dosyalar {
 }
 
 impl Dosyalar {
+    /// Aynı yol yeniden gelirse aynı kimlik döner: arayüz zaten açık belgeyi ikinci kez açmaz, sekmesine geçer.
     fn kaydet(&self, yol: PathBuf) -> u64 {
+        let mut liste = self.liste.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((k, _)) = liste.iter().find(|(_, y)| **y == yol) {
+            return *k;
+        }
         let k = self.sayac.fetch_add(1, Ordering::Relaxed) + 1;
-        self.liste.lock().unwrap_or_else(|e| e.into_inner()).insert(k, yol);
+        liste.insert(k, yol);
         k
     }
     fn yol(&self, k: u64) -> Option<PathBuf> {
@@ -46,7 +53,7 @@ impl Dosyalar {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Dosya {
     ad: String,
     /// Kabuğun listesindeki kimlik ("Kaydet" bununla doğrudan yazar)
@@ -98,20 +105,30 @@ fn atomik_yaz(yol: &Path, v: &[u8]) -> Result<(), String> {
     })
 }
 
-#[tauri::command]
-async fn dosya_ac(app: tauri::AppHandle, d: tauri::State<'_, Dosyalar>) -> Result<Option<Dosya>, String> {
-    let Some(s) = app.dialog().file().set_title("Belge aç").add_filter("Belgeler (UDF, Word)", &["udf", "docx"]).blocking_pick_file() else {
-        return Ok(None);
+/// Belgeler'de `onerilen` adının çakışmayan bir sürümü ("Ad (2).uzanti" vb.). Yeni belgenin ilk kaydı ve "Farklı
+/// kaydet" buraya düşer: yerli kaydetme penceresi (tauri-plugin-dialog) D-Bus/xdg-desktop-portal ister, ama bu
+/// birimde (armonia-yazi@.service) D-Bus kasıtlı olarak hiç yok (denetçi 24.11 O4) — pencere hep "Operation was
+/// cancelled" ile çöküyordu. Masaüstü sandbox'ı yalnız Belgeler ve İndirilenler'i bağlıyor; burada yol seçtirecek
+/// yerli bir bileşen yok, o yüzden sabit klasöre otomatik adla kaydedilir (kullanıcı dosyayı sonra Armonia
+/// Dosyalar'da yeniden adlandırabilir/taşıyabilir). Claude, 2026-11-25.
+fn carpismasiz_yol(onerilen: &str) -> PathBuf {
+    let kok = Path::new("/home/armonia/Belgeler");
+    let ad = Path::new(onerilen);
+    let govde = ad.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Belge".into());
+    let uzanti = ad.extension().map(|s| s.to_string_lossy().into_owned());
+    let adlandir = |i: u32| match (&uzanti, i) {
+        (Some(u), 0) => format!("{govde}.{u}"),
+        (Some(u), _) => format!("{govde} ({i}).{u}"),
+        (None, 0) => govde.clone(),
+        (None, _) => format!("{govde} ({i})"),
     };
-    let yol = s.into_path().map_err(|e| e.to_string())?;
-    dosya_oku(&yol, &d).map(Some)
+    (0..1000).map(adlandir).map(|a| kok.join(a)).find(|y| !y.exists()).unwrap_or_else(|| kok.join(onerilen))
 }
 
 /// Kaydeder. `kimlik` kabuğun listesindeyse ve uzantısı biçimle aynıysa ("Kaydet") doğrudan o dosyaya yazar; başka
-/// her durumda kaydetme penceresi açılır ve seçilen dosya listeye girer.
+/// her durumda Belgeler'de yeni bir ad üretilir (bkz. `carpismasiz_yol`) ve seçilen dosya listeye girer.
 #[tauri::command]
 async fn dosya_kaydet(
-    app: tauri::AppHandle,
     d: tauri::State<'_, Dosyalar>,
     onerilen: String,
     bayt: String,
@@ -119,23 +136,14 @@ async fn dosya_kaydet(
     kimlik: Option<u64>,
 ) -> Result<Option<Kayit>, String> {
     let v = b64().decode(bayt).map_err(|_| "belge bozuk".to_string())?;
-    let (filtre, uzanti) = match bicim.as_str() {
-        "docx" => ("Word belgesi", "docx"),
-        _ => ("UYAP belgesi (UDF)", "udf"),
-    };
+    let uzanti = if bicim == "docx" { "docx" } else { "udf" };
     let bilinen = kimlik.and_then(|k| d.yol(k).map(|y| (k, y))).filter(|(_, y)| {
         y.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() == Some(uzanti)
     });
     let (k, hedef) = match bilinen {
         Some(b) => b,
         None => {
-            let Some(s) = app.dialog().file().set_title("Kaydet").set_file_name(&onerilen).add_filter(filtre, &[uzanti]).blocking_save_file() else {
-                return Ok(None);
-            };
-            let mut p = s.into_path().map_err(|e| e.to_string())?;
-            if p.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() != Some(uzanti) {
-                p.set_extension(uzanti);
-            }
+            let p = carpismasiz_yol(&onerilen);
             (d.kaydet(p.clone()), p)
         }
     };
@@ -191,11 +199,55 @@ fn imza_dogrula(udf: String) -> Result<Option<imza::udf_imza::ImzaBilgisi>, Stri
     imza::udf_imza::udf_dogrula(&v).map_err(|e| e.to_string())
 }
 
+/// Başka bir örneğin devrettiği isteği bu pencerede açar: belge yeni sekme olur (arayüz: "dosya-ac"), yol yoksa
+/// yeni boş belge ("yeni-belge"). Pencere küçültülmüşse geri getirilir.
+#[cfg(unix)]
+fn devralinani_ac(uyg: &tauri::AppHandle, belge: Option<PathBuf>) {
+    use tauri::{Emitter, Manager};
+    let sonuc = match belge {
+        None => uyg.emit("yeni-belge", ()),
+        Some(yol) => match tek_ornek::kabul_edilir(&yol).and_then(|()| dosya_oku(&yol, &uyg.state::<Dosyalar>())) {
+            Ok(dosya) => uyg.emit("dosya-ac", dosya),
+            Err(e) => uyg.emit("ac-hata", e),
+        },
+    };
+    if let Err(e) = sonuc {
+        eprintln!("armonia-yazi: devralınan istek arayüze iletilemedi: {e}");
+    }
+    if let Some(p) = uyg.get_webview_window("main") {
+        let _ = p.unminimize();
+        let _ = p.set_focus();
+    }
+}
+
 fn main() {
+    // Armonia Yazı zaten açıksa belge o pencereye sekme olarak devredilir; bu örnek pencere açmadan çıkar
+    #[cfg(unix)]
+    let dinleyici = {
+        let belge = std::env::args_os().nth(1).map(PathBuf::from);
+        match tek_ornek::baslat(belge.as_deref()) {
+            tek_ornek::Baslangic::Devredildi => return,
+            tek_ornek::Baslangic::Dinle(d) => Some(d),
+            tek_ornek::Baslangic::Kapali => None,
+        }
+    };
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
         .manage(Dosyalar::default())
-        .invoke_handler(tauri::generate_handler![dosya_ac, dosya_kaydet, baslangic_dosyasi, imza_durum, imzala, imza_dogrula])
+        .setup(move |_uyg| {
+            #[cfg(unix)]
+            if let Some(d) = dinleyici {
+                let uyg = _uyg.handle().clone();
+                std::thread::spawn(move || {
+                    for akis in d.incoming().flatten() {
+                        if let Some(belge) = tek_ornek::istek_oku(akis) {
+                            devralinani_ac(&uyg, belge);
+                        }
+                    }
+                });
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![dosya_kaydet, baslangic_dosyasi, imza_durum, imzala, imza_dogrula])
         .run(tauri::generate_context!())
         .expect("Armonia Yazı başlatılamadı");
 }

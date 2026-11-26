@@ -14,7 +14,9 @@ elf_mimari() {  # ELF e_machine (ofset 18): 3e00 = x86_64, b700 = aarch64
 }
 hazir() { [ -f "$D/armonia-yazi" ] && [ -f "$D/armonia-imza" ] && [ "$(elf_mimari "$D/armonia-yazi")" = "$MIMARI" ] \
   && [ "$(elf_mimari "$D/armonia-imza")" = "$MIMARI" ]; }
-if ! hazir && [ -n "${SUDO_USER:-}" ] && [ -z "${ARMONIA_YAZI_CIKTI:-}" ] && [ -x "$EV/.cargo/bin/cargo" ]; then
+# Kaynak ikiliden yeniyse de yeniden derlenir (25.11: kaynak degistigi halde imaja eski ikili girmisti)
+eskimis() { [ -n "$(find "$KAYNAK/../armonia-yazi" \( -name target -o -name node_modules -o -name dist -o -name pkg \) -prune -o -type f -newer "$D/armonia-yazi" -print -quit 2>/dev/null)" ]; }
+if { ! hazir || eskimis; } && [ -n "${SUDO_USER:-}" ] && [ -z "${ARMONIA_YAZI_CIKTI:-}" ] && [ -x "$EV/.cargo/bin/cargo" ]; then
   echo "Armonia Yazi derleniyor (armonia-yazi/derle.sh, kullanici $SUDO_USER)"
   sudo -u "$SUDO_USER" env HOME="$EV" PATH="$EV/.cargo/bin:/usr/local/bin:/usr/bin:/bin" bash "$KAYNAK/../armonia-yazi/derle.sh"
 fi

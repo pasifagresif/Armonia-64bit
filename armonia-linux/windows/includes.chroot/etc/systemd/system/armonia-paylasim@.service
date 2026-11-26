@@ -1,17 +1,18 @@
-# Armonia: agdaki Windows program klasoru (Icramatik). Yalniz root baglar. Claude, 2026-11-23.
+# Armonia: agdaki Windows program klasoru (%i = uygulama kimligi, windows.apps.d/%i.conf). Yalniz root baglar.
+# Claude, 2026-11-23 (tek uygulama); 2026-11-25 (coklu uygulama: template unit, her uygulama kendi ornegi).
 # Type=simple: ag gelene kadar arka planda dener, acilisi bekletmez. Ad alani kum havuzu (ProtectSystem,
 # PrivateTmp...) KONMAZ: baglama ana ad alaninda gorunmeli.
 [Unit]
-Description=Armonia: agdaki Windows program klasoru
+Description=Armonia: agdaki Windows program klasoru (%i)
 After=network.target NetworkManager.service
-ConditionPathExists=/etc/armonia/windows.conf
+ConditionPathExists=/etc/armonia/windows.apps.d/%i.conf
 
 [Service]
 Type=simple
 RemainAfterExit=yes
-ExecStart=/opt/armonia/bin/paylasim_bagla.sh
-ExecStop=-/bin/umount -l /srv/paylasim/windows
-RuntimeDirectory=armonia-paylasim
+ExecStart=/opt/armonia/bin/paylasim_bagla.sh %i
+ExecStop=-/bin/umount -l /srv/paylasim/%i
+RuntimeDirectory=armonia-paylasim-%i
 RuntimeDirectoryMode=0700
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE

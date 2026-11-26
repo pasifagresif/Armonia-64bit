@@ -26,4 +26,13 @@ ls /usr/lib/*/wine/*-unix/winewayland.so >/dev/null 2>&1 \
 [ ! -u /usr/sbin/mount.cifs ] || chmod u-s /usr/sbin/mount.cifs
 # Wine'in masaustu/menu ve MIME iliskilendirmesi yapmasi istenmez (winemenubuilder baslaticida da kapali)
 rm -f /usr/share/applications/wine*.desktop
-systemctl enable armonia-paylasim.service
+# Coklu uygulama (2026-11-25): windows_hazirla.sh windows.apps.d/*.conf'u imaja koydu; her gercek tanim
+# (ornek dosya ".conf.ornek" ile biter, atlanir) kendi armonia-paylasim@<kimlik> ornegini alir.
+SAYI=0
+for f in /etc/armonia/windows.apps.d/*.conf; do
+  [ -f "$f" ] || continue
+  KIMLIK=$(basename "$f" .conf)
+  systemctl enable "armonia-paylasim@$KIMLIK.service"
+  SAYI=$((SAYI + 1))
+done
+[ "$SAYI" -gt 0 ] || echo "UYARI: windows.apps.d altinda tanimli uygulama yok (ornek: windows.apps.d/_ornek.conf.ornek'i kopyalayip doldurun)"

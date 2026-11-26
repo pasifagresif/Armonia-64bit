@@ -24,7 +24,7 @@ sh ./wasm_derle.sh >/dev/null
 echo "2/3 arayüz"
 (cd arayuz && npm ci --no-audit --no-fund && npm run build)
 echo "3/3 masaüstü uygulaması ve imza hizmeti"
-cargo build --release --locked -p armonia-yazi -p imza --bin armonia-yazi --bin armonia-imza
+cargo build --release --locked -p armonia-yazi -p imza --bin armonia-yazi --bin armonia-imza --features armonia-yazi/custom-protocol
 
 install -d "$CIKTI"
 install -m 0755 target/release/armonia-yazi target/release/armonia-imza "$CIKTI/"

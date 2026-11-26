@@ -7,7 +7,10 @@ B=armonia-cokluuyap.service
 bildir() { notify-send -a Armonia "Çoklu UYAP" "$1" 2>/dev/null; echo "Çoklu UYAP: $1" >&2; }
 [ -x /opt/armonia/cokluuyap/uyap_app ] || { bildir "Bu sistemde Çoklu UYAP kurulu değil."; exit 1; }
 if systemctl is-active --quiet "$B"; then
-  bildir "Çoklu UYAP zaten açık."
+  # Pencere dock'a kucultulmusse geri getirilir: uyap_app SIGUSR1'i yakalar (ruyap/src/linux_gosterge.rs). Yalniz
+  # ana surec (--kill-whom=main): yardimci alt surecler bu sinyalle olmesin. Izin: 60-armonia-cokluuyap.rules.
+  systemctl kill --kill-whom=main -s SIGUSR1 "$B" 2>/dev/null
+  bildir "Çoklu UYAP zaten açık, pencere öne getirildi."
   exit 0
 fi
 # Canli sistem (ISO, toram): veri RAM'de (kullanici karari 23.11)

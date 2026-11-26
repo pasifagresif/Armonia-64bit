@@ -1,18 +1,21 @@
 // Armonia alt dock (waybar). Tasarim: ortada yuzen, simgeli kutucuklar (kullanicinin ana ekran gorseli, 2026-11-19).
 // Sabit programlar + sagda acik pencereler. "Coklu UYAP", "UYAP Editor (.udf)", "Yazici ve Tarayici" kutucuklari
 // ilgili asamalarda eklenecek. Claude, 2026-11-19.
+// 26.11: dock artik ekrandan yer AYIRMAZ ("exclusive": false) ve en ust katmandadir; ne zaman gorunecegine
+// armonia-dock bekcisi karar verir (pencere aciksa gizli, fare alt kenara gelince gorunur). Bu waybar'i
+// autostart degil bekci baslatir (armonia-uygulamalar/dock).
 {
-  "layer": "top",
+  "layer": "overlay",
+  "exclusive": false,
   "position": "bottom",
   "height": 86,
   "margin-bottom": 8,
   "spacing": 2,
-  "modules-center": ["custom/uyap", "custom/edevlet", "custom/yazi", "custom/tablo", "custom/belgeler", "wlr/taskbar"],
+  "modules-center": ["custom/uyap", "custom/yazi", "custom/tablo", "custom/belgeler", "wlr/taskbar"],
   "custom/uyap": { "format": "UYAP &amp;\ne-Duruşma", "justify": "center", "tooltip-format": "UYAP Avukat Portalı", "on-click": "xdg-open https://avukat.uyap.gov.tr/" },
-  "custom/edevlet": { "format": "e-Devlet\n ", "justify": "center", "tooltip-format": "turkiye.gov.tr", "on-click": "xdg-open https://www.turkiye.gov.tr/" },
-  "custom/yazi": { "format": "Yazı\n(Writer)", "justify": "center", "tooltip-format": "LibreOffice Writer", "on-click": "libreoffice --writer" },
+  "custom/yazi": { "format": "Yazı\n ", "justify": "center", "tooltip-format": "Armonia Yazı (yeni belge)", "on-click": "/opt/armonia/bin/yazi_ac.sh" },
   "custom/tablo": { "format": "Tablo\n(Calc)", "justify": "center", "tooltip-format": "LibreOffice Calc", "on-click": "libreoffice --calc" },
-  "custom/belgeler": { "format": "Belgelerim\n ", "justify": "center", "tooltip-format": "Dosya yöneticisi", "on-click": "thunar" },
+  "custom/belgeler": { "format": "Belgelerim\n ", "justify": "center", "tooltip-format": "Armonia Dosyalar", "on-click": "/opt/armonia/uygulamalar/armonia-dosyalar" },
   "wlr/taskbar": {
     "format": "{icon}",
     "icon-size": 30,

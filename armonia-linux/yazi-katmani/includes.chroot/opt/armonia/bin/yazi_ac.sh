@@ -26,4 +26,10 @@ if [ $# -ge 1 ] && [ -n "$1" ]; then
   esac
 fi
 # -w 2: Accept=yes'te systemd bağlantıyı pencere kapanana dek açık tutar; nc 2 sn boşta kalınca çıkar
-printf '%s\n' "$YOL" | exec /usr/bin/nc.openbsd -N -w 2 -U /run/armonia-yazi.sock
+printf '%s\n' "$YOL" | /usr/bin/nc.openbsd -N -w 2 -U /run/armonia-yazi.sock
+DURUM=$?
+# Armonia Yazı zaten açıksa belge o pencereye SEKME olarak devredilir (26.11) ama Wayland'da uygulama kendi
+# penceresini öne alamaz: pencereyi buradan (masaüstü oturumundan) öne getiririz. Pencere yeni açılıyorsa zaten
+# öndedir; henüz yoksa komut hiçbir şey yapmaz.
+[ -x /opt/armonia/uygulamalar/armonia-one-getir ] && /opt/armonia/uygulamalar/armonia-one-getir "Armonia Yazı" >/dev/null 2>&1
+exit "$DURUM"

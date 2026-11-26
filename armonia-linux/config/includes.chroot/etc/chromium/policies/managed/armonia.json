@@ -3,6 +3,10 @@
     "*"
   ],
   "URLAllowlist": [
+    "https://cokluuyap.com",
+    "https://www.cokluuyap.com",
+    "http://cokluuyap.com",
+    "http://www.cokluuyap.com",
     "https://uyap.gov.tr",
     "https://adalet.gov.tr",
     "https://turkiye.gov.tr",
@@ -35,7 +39,6 @@
   "RestoreOnStartupURLs": [
     "https://avukat.uyap.gov.tr/"
   ],
-  "NewTabPageLocation": "https://avukat.uyap.gov.tr/",
   "BookmarkBarEnabled": true,
   "ManagedBookmarks": [
     {

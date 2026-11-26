@@ -27,6 +27,9 @@ export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
 export XDG_RUNTIME_DIR="$R" WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland HOME=/home/armonia \
   XDG_CONFIG_HOME="$D/config" XDG_CACHE_HOME="$D/cache" XDG_DATA_HOME="$D/data" TMPDIR="$D/tmp"
 unset DISPLAY
+# Tek pencere: Armonia Yazı zaten açıksa belge o pencereye SEKME olarak devredilir (masaustu/src/tek_ornek.rs).
+# Soket veri klasöründe: bütün örneklere bağlı (BindPaths), yalnız 'armonia' erişir (klasör 0700).
+export ARMONIA_YAZI_TEK_SOKET="$D/tek.sock"
 mkdir -p "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$TMPDIR"
 printf 'XDG_DOCUMENTS_DIR="$HOME/Belgeler"\nXDG_DOWNLOAD_DIR="$HOME/İndirilenler"\n' > "$XDG_CONFIG_HOME/user-dirs.dirs"
 # Bağlantı soketi uygulamaya devredilmesin

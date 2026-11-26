@@ -56,7 +56,11 @@ DevicePolicy=closed
 DeviceAllow=char-drm rw
 # Internet acik (UYAP sunuculari), yerel ag kapali. Yerel kapilar nft ile: yalniz DNS, 5975 (e-imza), 8800 (kendi
 # vekili). Giris zinciri zaten kapali (policy drop): 0.0.0.0:8800 dinlemesi LAN'dan erisilemez.
-IPAddressAllow=localhost
+# Bu ayar yalniz adres bazli (port suzmez); buro ici paylasimli sunucu icin 8800'e indirgenen izin nft'de
+# (cokluuyap_yerel.nft) ayrica yapilir. Ayni RFC1918 araligi hem Allow hem Deny'de oldugunda Allow kazanir
+# (systemd kurali: ayni ozgulluktekiAllow Deny'den once gelir) — asagidaki uc girdi bu yuzden Deny'deki ayni
+# ucluyle birebir eslesiyor (kullanici karari 25.11).
+IPAddressAllow=localhost 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
 IPAddressDeny=link-local multicast 255.255.255.255/32 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
 LimitCORE=0
 ProtectKernelTunables=yes

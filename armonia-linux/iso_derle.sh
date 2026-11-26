@@ -92,22 +92,13 @@ menuentry "Armonia" --unrestricted {
 	initrd /live/initrd.img
 }
 EOT
-if [ "$WINDOWS" = "1" ]; then
-  cp "$KAYNAK"/windows/hooks/*.hook.chroot config/hooks/normal/
-  cp -a "$KAYNAK/windows/includes.chroot/." config/includes.chroot/
-  grep -q '^PAYLASIM="//' "$KAYNAK/windows/includes.chroot/etc/armonia/windows.conf" \
-    || echo "UYARI: windows.conf'ta PAYLASIM bos; Icramatik kisayolu 'Ayarlanmamis' diyecek"
-  # Dock'a Icramatik kutucugu (yalniz bu derlemenin kopyasinda)
-  D=config/includes.chroot/etc/armonia/waybar/dock.jsonc
-  sed -i -e 's|"custom/belgeler", "wlr/taskbar"|"custom/belgeler", "custom/icramatik", "wlr/taskbar"|' \
-    -e '/^  "custom\/belgeler":/a\  "custom/icramatik": { "format": "İcramatik\\n ", "justify": "center", "tooltip-format": "Ağdaki İcramatik (ağsız kum havuzu)", "on-click": "/opt/armonia/bin/windows_calistir.sh" },' "$D"
-  grep -q '"custom/icramatik", "wlr/taskbar"' "$D" && grep -q '^  "custom/icramatik":' "$D" \
-    || { echo "HATA: dock'a Icramatik eklenemedi"; exit 1; }
-fi
 # Faz 3 sertlestirme katmani (guvenlik-denetci denetiminden gecti, 2026-11-14)
 cp -a "$KAYNAK/sertlestirme/etc/." config/includes.chroot/etc/
 # Armonia'nin kendi uygulamalari (Ayarlar, Hukuk Hesaplayici): derlenip /opt/armonia/uygulamalar'a
 bash "$KAYNAK/uygulamalari_hazirla.sh" config/includes.chroot x86_64
+if [ "$WINDOWS" = "1" ]; then
+  bash "$KAYNAK/windows_hazirla.sh" config/includes.chroot config/hooks/normal
+fi
 if [ "$COKLUUYAP" = "1" ]; then
   bash "$KAYNAK/cokluuyap_hazirla.sh" config/includes.chroot x86_64 config/hooks/normal
 fi
@@ -128,7 +119,7 @@ fi
 # SERI=1 -> uretim imaji + yalniz gunlugun COM1'e akmasi (uygulama hatasi teshisi; armonia_seri.iso). 2026-11-14.
 if [ "${SERI:-0}" = "1" ]; then
   mkdir -p config/includes.chroot/etc/systemd/journald.conf.d
-  cp "$KAYNAK/test/config-test/includes.chroot/etc/systemd/journald.conf.d/90-test-seri.conf" \
+  cp "$KAYNAK/test/config-test/includes.chroot/etc/systemd/journald.conf.d/90-armonia-seri.conf" \
      config/includes.chroot/etc/systemd/journald.conf.d/
 fi
 # Tarayici (chromium) artik uretim katmaninda: config/ (armonia-tarayici.socket/@.service, xdg-open, politika).
@@ -147,7 +138,8 @@ find config/includes.chroot config/hooks config/bootloaders -type d -exec chmod 
 find config/includes.chroot config/hooks config/bootloaders -type f -exec chmod 0644 {} +
 chmod 0755 config/hooks/normal/*.hook.chroot config/includes.chroot/opt/armonia/bin/*.sh
 chmod 0755 config/includes.chroot/opt/armonia/bin/ayar-yardimci config/includes.chroot/opt/armonia/bin/tema-yardimci \
-  config/includes.chroot/opt/armonia/uygulamalar/*
+  config/includes.chroot/opt/armonia/bin/tarayici-yardimci config/includes.chroot/opt/armonia/uygulamalar/*
+[ -f config/includes.chroot/opt/armonia/bin/pencere-yardimci ] && chmod 0755 config/includes.chroot/opt/armonia/bin/pencere-yardimci
 [ -f config/includes.chroot/usr/local/bin/xdg-open ] && chmod 0755 config/includes.chroot/usr/local/bin/xdg-open
 # Coklu UYAP ikilisi (yukaridaki genel 0644 x bitini siler; kanca -x sinamasi icin, denetci 23.11 K1)
 [ -f config/includes.chroot/opt/armonia/cokluuyap/uyap_app ] && chmod 0755 config/includes.chroot/opt/armonia/cokluuyap/uyap_app
@@ -173,7 +165,8 @@ for f in binary/boot/grub/loopback.cfg binary/boot/grub/x86_64-efi/grub.cfg; do
   [ -f "$f" ] || continue
   grep -qE '^[[:space:]]*menuentry' "$f" && { echo "HATA: $f kendi menusunu tasiyor"; exit 9; }
 done
-[ -n "$(find binary -ipath 'binary/efi/boot/bootx64.efi')" ] || { echo "HATA: UEFI acilisi icin EFI/boot/bootx64.efi yok"; exit 9; }
+# NOT: Turkce locale'de -ipath Icin/i harfinde bozuluyor (I/ı, İ/i ozel kucultme), LC_ALL=C ile calistir.
+[ -n "$(LC_ALL=C find binary -ipath 'binary/efi/boot/bootx64.efi')" ] || { echo "HATA: UEFI acilisi icin EFI/boot/bootx64.efi yok"; exit 9; }
 # USB'den UEFI acilisinda firmware cogu zaman ISO9660'taki EFI/ dizinini degil, gomulu FAT imajini (efi.img,
 # El Torito EFI girdisi) kullanir (denetci 23.11 ORTA-3)
 [ -f binary/boot/grub/efi.img ] || { echo "HATA: UEFI icin binary/boot/grub/efi.img yok"; exit 9; }

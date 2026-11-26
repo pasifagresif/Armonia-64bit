@@ -1,0 +1,17 @@
+// Armonia masaustu simgeleri (waybar, "bottom" katmani: duvar kagidinin ustunde, pencerelerin altinda).
+// Kullanici istegi 25.11: Ev, Belgeler, UYAP klasorleri masaustunde simge olarak dursun. Tek tikla Armonia
+// Dosyalar o klasorde acilir. Claude, 2026-11-26.
+{
+  "layer": "bottom",
+  "position": "left",
+  "exclusive": false,
+  "width": 100,
+  "margin-top": 18,
+  "margin-left": 18,
+  "spacing": 12,
+  "modules-left": ["custom/m-ev", "custom/m-belgeler", "custom/m-uyap", "custom/m-cop"],
+  "custom/m-ev": { "format": "Ev", "justify": "center", "tooltip-format": "Ev klasörü", "on-click": "exec /opt/armonia/uygulamalar/armonia-dosyalar \"$HOME\"" },
+  "custom/m-belgeler": { "format": "Belgeler", "justify": "center", "tooltip-format": "Belgeler klasörü", "on-click": "exec /opt/armonia/uygulamalar/armonia-dosyalar \"$HOME/Belgeler\"" },
+  "custom/m-uyap": { "format": "UYAP", "justify": "center", "tooltip-format": "UYAP evrak klasörü (Belgeler/UYAP)", "on-click": "mkdir -p \"$HOME/Belgeler/UYAP\"; exec /opt/armonia/uygulamalar/armonia-dosyalar \"$HOME/Belgeler/UYAP\"" },
+  "custom/m-cop": { "format": "Çöp Kutusu", "justify": "center", "tooltip-format": "Silinen dosyalar (geri yüklenebilir)", "on-click": "exec /opt/armonia/uygulamalar/armonia-dosyalar --cop" }
+}

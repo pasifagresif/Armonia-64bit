@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Windows Programları
+Comment=Ağdaki Windows programlarını ekle/düzenle/çalıştır (İcramatik vb., birden fazla olabilir)
+Exec=/opt/armonia/uygulamalar/armonia-windows-ayarlari
+Icon=preferences-system
+Categories=Settings;
+Terminal=false

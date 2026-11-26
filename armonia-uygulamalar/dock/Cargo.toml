@@ -1,0 +1,22 @@
+[package]
+name = "armonia_dock"
+version = "0.1.0"
+edition = "2021"
+description = "Armonia dock bekçisi: pencere açıkken dock'u gizler, alt kenarda geri getirir"
+publish = false
+
+[[bin]]
+name = "armonia-dock"
+path = "src/main.rs"
+
+[dependencies]
+# eframe'in zaten çektiği sürümler (Cargo.lock'ta var; yeni indirme gerekmez)
+smithay-client-toolkit = { version = "0.19", default-features = false }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+libc = "0.2"
+
+[[bin]]
+name = "armonia-one-getir"
+path = "src/one_getir.rs"

@@ -1,0 +1,75 @@
+#!/bin/sh
+# Armonia tarayici web filtresi (URLAllowlist) icin parola korumali gecici acma. ayar-yardimci ile ayni desen:
+# pkexec ile cagrilir (polkit tr.armonia.tarayici: etkin yerel oturum, PAROLASIZ) ama BURADAKI asil koruma
+# polkit degil, bu betigin KENDI parola denetimi (openssl passwd hash karsilastirmasi) — amac sistem kullanicisini
+# degil, tarayiciyi kazara/dusunmeden sinirlarin disina cikmaktan caydirmak (kullanici karari 25.11.2026).
+# Henuz parola belirlenmemisse "ac" PAROLASIZ calisir (kullanici karari 25.11: varsayilan acik/serbest; parola
+# istenirse Ayarlar'dan sonradan belirlenip siki tutulabilir). Claude, 2026-11-25.
+#   tarayici-yardimci parola-belirle -   stdin: 1. eski parola (ilk kurulumda bos)  2. yeni parola
+#   tarayici-yardimci ac <dakika> -      stdin: parola; dogruysa filtre <dakika> sonra KENDILIGINDEN kilitlenir
+#   tarayici-yardimci kilitle             filtreyi hemen geri kurar (parola gerekmez: herkes KISITLAMAYI artirabilir)
+#   tarayici-yardimci durum               "acik <kalan_dk>" ya da "kilitli" (parola gerekmez, salt okuma)
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+HASH=/etc/armonia/tarayici_kilit.hash
+POLITIKA=/etc/chromium/policies/managed/armonia.json
+ACIK=/etc/armonia/tarayici_politika_acik.json
+YEDEK=/etc/armonia/tarayici_kilitli_yedek.json
+BIRIM=armonia-tarayici-kilit
+
+dogrula() {  # girilen_parola — hash dosyasi yoksa parola HENUZ belirlenmemis: varsayilan serbest, basarili say
+  [ -s "$HASH" ] || return 0
+  H=$(cat "$HASH")
+  SALT=$(echo "$H" | cut -d'$' -f3)
+  [ "$(openssl passwd -6 -salt "$SALT" "$1")" = "$H" ]
+}
+
+kilitle_birim_iptal() {
+  systemctl stop "$BIRIM.timer" >/dev/null 2>&1 || true
+  systemctl stop "$BIRIM.service" >/dev/null 2>&1 || true
+}
+
+[ $# -ge 1 ] || { echo "kullanim: tarayici-yardimci parola-belirle|ac|kilitle|durum ..." >&2; exit 2; }
+case "$1" in
+  parola-belirle)
+    [ $# -eq 2 ] && [ "$2" = "-" ] || { echo "kullanim: tarayici-yardimci parola-belirle -" >&2; exit 2; }
+    IFS= read -r ESKI || ESKI=""
+    IFS= read -r YENI || YENI=""
+    N=$(printf '%s' "$YENI" | wc -c)
+    [ "$N" -ge 4 ] || { echo "yeni parola en az 4 karakter olmali" >&2; exit 2; }
+    if [ -s "$HASH" ]; then
+      dogrula "$ESKI" || { echo "eski parola yanlis" >&2; exit 3; }
+    fi
+    SALT=$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 16)
+    install -d -m 0755 "$(dirname "$HASH")"
+    T=$(mktemp "$(dirname "$HASH")/.XXXXXX")
+    openssl passwd -6 -salt "$SALT" "$YENI" > "$T"
+    chmod 0600 "$T"; mv -f "$T" "$HASH"
+    echo "parola belirlendi" ;;
+  ac)
+    [ $# -eq 3 ] && [ "$3" = "-" ] || { echo "kullanim: tarayici-yardimci ac <dakika> -" >&2; exit 2; }
+    case "$2" in [1-9]|[1-9][0-9]|[1-9][0-9][0-9]) ;; *) echo "dakika 1-999 araliginda olmali" >&2; exit 2 ;; esac
+    DAKIKA=$2
+    IFS= read -r PAROLA || PAROLA=""
+    dogrula "$PAROLA" || { echo "parola yanlis" >&2; exit 3; }
+    [ -f "$YEDEK" ] || { cp "$POLITIKA" "$YEDEK"; chmod 0600 "$YEDEK"; }
+    install -m 0644 "$ACIK" "$POLITIKA"
+    kilitle_birim_iptal
+    systemd-run --unit="$BIRIM" --on-active="${DAKIKA}min" \
+      /opt/armonia/bin/tarayici-yardimci kilitle >/dev/null 2>&1
+    echo "acildi: $DAKIKA dakika sonra otomatik kilitlenecek" ;;
+  kilitle)
+    [ $# -eq 1 ] || { echo "kullanim: tarayici-yardimci kilitle" >&2; exit 2; }
+    if [ -f "$YEDEK" ]; then
+      install -m 0644 "$YEDEK" "$POLITIKA"
+      rm -f "$YEDEK"
+    fi
+    kilitle_birim_iptal
+    echo "kilitlendi" ;;
+  durum)
+    [ $# -eq 1 ] || { echo "kullanim: tarayici-yardimci durum" >&2; exit 2; }
+    # Kalan dakika systemd'den guvenilir sekilde ayrıstırılamadığı icin sadece acik/kilitli bildirilir;
+    # kalan sure arayuzde "ac" cagrisindaki sureden hesaplanir (sayfa kendi sayacini tutar).
+    if [ -f "$YEDEK" ]; then echo "acik"; else echo "kilitli"; fi ;;
+  *) echo "bilinmeyen komut: $1" >&2; exit 2 ;;
+esac

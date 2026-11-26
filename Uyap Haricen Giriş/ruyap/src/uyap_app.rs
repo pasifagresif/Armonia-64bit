@@ -1888,8 +1888,9 @@ impl UyapApp {
                                 self.kompakt_boyuta_don(ctx);
                                 #[cfg(windows)]
                                 crate::tepsi::gizle();
+                                // Linux: tepsi yok; pencere dock'a küçülür, program çalışmaya devam eder
                                 #[cfg(not(windows))]
-                                self.on_close();
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                             }
                             1 => buyut_degistir = true,
                             _ => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
@@ -2461,7 +2462,7 @@ impl UyapApp {
                             #[cfg(windows)]
                             crate::tepsi::gizle();
                             #[cfg(not(windows))]
-                            self.on_close();
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                         }
                     });
                 });
@@ -2810,6 +2811,12 @@ impl eframe::App for UyapApp {
             if self.screen == ScreenMode::Dashboard && self.tepsi.is_some() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 crate::tepsi::gizle();
+                return;
+            }
+            #[cfg(not(windows))]
+            if self.screen == ScreenMode::Dashboard {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 return;
             }
             self.on_close();
@@ -3193,6 +3200,9 @@ pub fn main() {
     crate::guncelleme::baslat();
 
     let options = eframe::NativeOptions {
+        // Linux/Wayland: küçültülmüş pencereye çerçeve geri çağrısı gelmez; vsync açıkken çizim orada bekler ve
+        // update döngüsü (paylaşım takibi, otomatik giriş) durur. Ölçüldü (26.11, labwc): vsync kapalıyken sürer.
+        vsync: !cfg!(target_os = "linux"),
         viewport: egui::ViewportBuilder::default()
             .with_title("Çoklu UYAP - Kontrol Ekranı")
             .with_decorations(false)
@@ -3220,6 +3230,8 @@ pub fn main() {
             {
                 app.tepsi = crate::tepsi::kur(cc.egui_ctx.clone());
             }
+            #[cfg(target_os = "linux")]
+            crate::linux_gosterge::kur(cc.egui_ctx.clone());
             Ok(Box::new(app))
         }),
     );

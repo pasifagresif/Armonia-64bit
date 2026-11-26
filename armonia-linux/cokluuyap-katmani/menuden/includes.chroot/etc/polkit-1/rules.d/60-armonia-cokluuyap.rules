@@ -1,10 +1,12 @@
-// Armonia: masaustu kullanicisi ('armonia') YALNIZ armonia-cokluuyap.service birimini baslatip durdurabilir
-// (menu kisayolu). Baska birim, baska fiil (enable, mask, ...) ya da uzak/etkin olmayan oturum bu kurala uymaz ve
-// varsayilan polkit kararina (yonetici parolasi) duser. Claude, 2026-11-23.
+// Armonia: masaustu kullanicisi ('armonia') YALNIZ armonia-cokluuyap.service birimini baslatip durdurabilir,
+// ya da zaten acikken SIGUSR1 ile penceresini one getirebilir (kill fiili; "simge durumuna indirme" Wayland'da
+// desteklenmedigi icin pencere gizlenince dock kisayoluyla geri getiriliyor, bkz. linux_gosterge, 25.11).
+// Baska birim, baska fiil (enable, mask, ...) ya da uzak/etkin olmayan oturum bu kurala uymaz ve varsayilan
+// polkit kararina (yonetici parolasi) duser. Claude, 2026-11-23 (kill fiili 25.11).
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         action.lookup("unit") == "armonia-cokluuyap.service" &&
-        (action.lookup("verb") == "start" || action.lookup("verb") == "stop") &&
+        (action.lookup("verb") == "start" || action.lookup("verb") == "stop" || action.lookup("verb") == "kill") &&
         subject.user == "armonia" && subject.local && subject.active) {
         return polkit.Result.YES;
     }

@@ -57,7 +57,11 @@ fn calistir(program: &str, argumanlar: &[&str]) -> Result<String, String> {
         Ok(String::from_utf8_lossy(&c.stdout).into_owned())
     } else {
         let hata = String::from_utf8_lossy(&c.stderr).trim().to_string();
-        Err(if hata.is_empty() { format!("{program} başarısız ({})", c.status) } else { hata })
+        Err(if hata.is_empty() {
+            format!("{program} başarısız ({})", c.status)
+        } else {
+            hata
+        })
     }
 }
 
@@ -68,7 +72,10 @@ pub fn durum_coz(json: &str) -> Result<Durum, String> {
 /// Katman yoksa (ISO, anahtarsız derleme) boş durum: "yalnız imajla güncellenir".
 pub fn durum() -> Result<Durum, String> {
     if !Path::new(ARAC).exists() {
-        return Ok(Durum { canli: crate::sistem::canli(), ..Default::default() });
+        return Ok(Durum {
+            canli: crate::sistem::canli(),
+            ..Default::default()
+        });
     }
     durum_coz(&calistir(ARAC, &["durum"])?)
 }
@@ -78,7 +85,9 @@ fn systemctl_baslat(birim: &str) -> Result<(), String> {
 }
 
 fn birim_ozelligi(birim: &str, ozellik: &str) -> String {
-    calistir("systemctl", &["show", "-p", ozellik, "--value", birim]).map(|s| s.trim().to_string()).unwrap_or_default()
+    calistir("systemctl", &["show", "-p", ozellik, "--value", birim])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }
 
 pub fn denetle() -> Result<(), String> {
@@ -99,17 +108,29 @@ pub fn indir_ve_kur() -> Result<String, String> {
     loop {
         std::thread::sleep(Duration::from_millis(700));
         if let Some(k) = son_kurulum().filter(|k| Some(k) != onceki_kurulum.as_ref()) {
-            return Ok(k.lines().find_map(|l| l.strip_prefix("surum=")).unwrap_or_default().chars().filter(|c| c.is_ascii_digit() || *c == '.').take(20).collect());
+            return Ok(k
+                .lines()
+                .find_map(|l| l.strip_prefix("surum="))
+                .unwrap_or_default()
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.')
+                .take(20)
+                .collect());
         }
         let kimlik = birim_ozelligi(KUR, "InvocationID");
-        if !kimlik.is_empty() && kimlik != onceki_kimlik && birim_ozelligi(KUR, "ActiveState") == "failed" {
+        if !kimlik.is_empty()
+            && kimlik != onceki_kimlik
+            && birim_ozelligi(KUR, "ActiveState") == "failed"
+        {
             return Err(format!(
                 "kurulum başarısız ({}). Ayrıntı: journalctl -u {KUR}. Çoklu UYAP önceki sürümüyle çalışmaya devam eder.",
                 birim_ozelligi(KUR, "Result")
             ));
         }
         if bas.elapsed() > Duration::from_secs(15 * 60) {
-            return Err(format!("kurulum 15 dakikada bitmedi. Ayrıntı: journalctl -u {KUR}"));
+            return Err(format!(
+                "kurulum 15 dakikada bitmedi. Ayrıntı: journalctl -u {KUR}"
+            ));
         }
     }
 }
@@ -144,7 +165,9 @@ pub fn yerel_zaman(s: &str) -> String {
         return s.to_string();
     }
     let n = |a: usize, c: usize| s.get(a..a + c).and_then(|t| t.parse::<i64>().ok());
-    let (Some(y), Some(mo), Some(d), Some(h), Some(mi)) = (n(0, 4), n(5, 2), n(8, 2), n(11, 2), n(14, 2)) else {
+    let (Some(y), Some(mo), Some(d), Some(h), Some(mi)) =
+        (n(0, 4), n(5, 2), n(8, 2), n(11, 2), n(14, 2))
+    else {
         return s.to_string();
     };
     // Gün taşması: ay sonu ve yıl sonu

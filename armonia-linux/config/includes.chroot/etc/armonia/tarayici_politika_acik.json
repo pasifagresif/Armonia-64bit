@@ -1,0 +1,81 @@
+{
+  "URLBlocklist": [],
+  "LocalNetworkAccessAllowedForUrls": [
+    "https://avukat.uyap.gov.tr"
+  ],
+  "HomepageLocation": "https://avukat.uyap.gov.tr/",
+  "HomepageIsNewTabPage": false,
+  "ShowHomeButton": true,
+  "RestoreOnStartup": 4,
+  "RestoreOnStartupURLs": [
+    "https://avukat.uyap.gov.tr/"
+  ],
+  "BookmarkBarEnabled": true,
+  "ManagedBookmarks": [
+    {
+      "toplevel_name": "Adli siteler"
+    },
+    {
+      "name": "UYAP Avukat Portalı",
+      "url": "https://avukat.uyap.gov.tr/"
+    },
+    {
+      "name": "e-Devlet",
+      "url": "https://www.turkiye.gov.tr/"
+    },
+    {
+      "name": "UYAP Emsal Karar",
+      "url": "https://emsal.uyap.gov.tr/"
+    },
+    {
+      "name": "Yargıtay Karar Arama",
+      "url": "https://karararama.yargitay.gov.tr/"
+    },
+    {
+      "name": "Mevzuat",
+      "url": "https://www.mevzuat.gov.tr/"
+    },
+    {
+      "name": "Resmî Gazete",
+      "url": "https://www.resmigazete.gov.tr/"
+    },
+    {
+      "name": "Türkiye Barolar Birliği",
+      "url": "https://www.barobirlik.org.tr/"
+    }
+  ],
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "MetricsReportingEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SafeBrowsingProtectionLevel": 0,
+  "SearchSuggestEnabled": false,
+  "TranslateEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "DnsOverHttpsMode": "off",
+  "DeveloperToolsAvailability": 2,
+  "TaskManagerEnabled": false,
+  "BrowserLabsEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+  "BackgroundModeEnabled": false,
+  "IncognitoModeAvailability": 1,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "ExtensionInstallBlocklist": [
+    "*"
+  ],
+  "AllowFileSelectionDialogs": true,
+  "DownloadDirectory": "/home/armonia/İndirilenler",
+  "PromptForDownloadLocation": false,
+  "DefaultNotificationsSetting": 2,
+  "DefaultGeolocationSetting": 2,
+  "VideoCaptureAllowedUrls": [
+    "https://*.uyap.gov.tr"
+  ],
+  "AudioCaptureAllowedUrls": [
+    "https://*.uyap.gov.tr"
+  ]
+}

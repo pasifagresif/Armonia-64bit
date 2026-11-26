@@ -4,19 +4,19 @@ window#waybar { background: transparent; }
 .modules-center {
   background: alpha(#@ZEMIN@, 0.97); border: 1px solid #@KENAR@; border-radius: 18px; padding: 6px 8px;
 }
-#custom-cokluuyap, #custom-uyap, #custom-edevlet, #custom-yazi, #custom-tablo, #custom-belgeler, #custom-icramatik {
+#custom-cokluuyap, #custom-uyap, #custom-yazi, #custom-tablo, #custom-belgeler {
   color: #@YAZI@; min-width: 84px; padding: 40px 6px 4px 6px; border-radius: 12px;
   background-repeat: no-repeat; background-size: 30px 30px; background-position: center 6px;
 }
-/* Simgesi olmayan kutucuklar (Coklu UYAP, Icramatik): yazi ortada */
-#custom-cokluuyap, #custom-icramatik { padding: 12px 6px; }
+/* Simgesi olmayan kutucuk (Coklu UYAP): yazi ortada. Windows katmani kendi kutucuklarini
+   (#custom-windows-<kimlik>) windows_hazirla.sh ile bu dosyanin sonuna EKLER, burasi degistirilmez. */
+#custom-cokluuyap { padding: 12px 6px; }
 #custom-uyap { background-image: url("/usr/share/armonia/simge/uyap.png"); }
-#custom-edevlet { background-image: url("/usr/share/armonia/simge/edevlet.png"); }
 #custom-yazi { background-image: url("/usr/share/armonia/simge/yazi.png"); }
 #custom-tablo { background-image: url("/usr/share/armonia/simge/tablo.png"); }
 #custom-belgeler { background-image: url("/usr/share/armonia/simge/belgeler.png"); }
-#custom-cokluuyap:hover, #custom-uyap:hover, #custom-edevlet:hover, #custom-yazi:hover, #custom-tablo:hover,
-#custom-belgeler:hover, #custom-icramatik:hover { background-color: #@VURGU_ZEMIN@; }
+#custom-cokluuyap:hover, #custom-uyap:hover, #custom-yazi:hover, #custom-tablo:hover,
+#custom-belgeler:hover { background-color: #@VURGU_ZEMIN@; }
 #taskbar { margin-left: 6px; border-left: 1px solid #@KENAR@; padding-left: 6px; }
 #taskbar.empty { border-left: none; margin: 0; padding: 0; }
 #taskbar button { padding: 0 8px; margin: 4px 1px; border-radius: 12px; }

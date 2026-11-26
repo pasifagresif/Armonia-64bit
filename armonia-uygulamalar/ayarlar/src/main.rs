@@ -50,13 +50,18 @@ fn karistir(a: Color32, b: Color32, t: f32) -> Color32 {
 
 impl Renkler {
     fn yeni(t: &sistem::Tema) -> Self {
-        let [arka, zemin, yazi, kenar, hap, vurgu, vurgu_koyu, vurgu_zemin, _pasif, vurgu_uzeri] = t.renk.map(hex);
+        let [arka, zemin, yazi, kenar, hap, vurgu, vurgu_koyu, vurgu_zemin, _pasif, vurgu_uzeri] =
+            t.renk.map(hex);
         let koyu = t.kimlik == "koyu";
         Renkler {
             arka,
             kart: zemin,
             // Koyu zeminde koyu vurgu okunmaz: başlık/olumlu yazı vurgunun açılmış tonu
-            baslik: if koyu { karistir(vurgu, Color32::WHITE, 0.45) } else { vurgu_koyu },
+            baslik: if koyu {
+                karistir(vurgu, Color32::WHITE, 0.45)
+            } else {
+                vurgu_koyu
+            },
             vurgu,
             kenar,
             yazi,
@@ -72,7 +77,10 @@ impl Renkler {
 static RENK: std::sync::RwLock<Option<Renkler>> = std::sync::RwLock::new(None);
 
 fn r() -> Renkler {
-    RENK.read().ok().and_then(|g| *g).unwrap_or_else(|| Renkler::yeni(&sistem::armonia_temasi()))
+    RENK.read()
+        .ok()
+        .and_then(|g| *g)
+        .unwrap_or_else(|| Renkler::yeni(&sistem::armonia_temasi()))
 }
 
 fn renkleri_sec(t: &sistem::Tema) {
@@ -89,17 +97,19 @@ enum Bolum {
     Yazicilar,
     Usb,
     CokluUyap,
+    Tarayici,
     Gorunum,
     Hakkinda,
 }
 
-const BOLUMLER: [(Bolum, &str); 8] = [
+const BOLUMLER: [(Bolum, &str); 9] = [
     (Bolum::Ag, "Ağ"),
     (Bolum::Klavye, "Klavye"),
     (Bolum::Ekran, "Ekran ve kilit"),
     (Bolum::Yazicilar, "Yazıcılar"),
     (Bolum::Usb, "USB aygıtları"),
     (Bolum::CokluUyap, "Çoklu UYAP"),
+    (Bolum::Tarayici, "Tarayıcı filtresi"),
     (Bolum::Gorunum, "Görünüm"),
     (Bolum::Hakkinda, "Hakkında"),
 ];
@@ -128,13 +138,22 @@ struct Uygulama {
     /// Kurulum bitti, Çoklu UYAP açıksa yeniden başlatma önerilir
     yeniden_baslat_oner: bool,
     imaja_don_sor: bool,
+    // Tarayıcı web filtresi (25.11)
+    tarayici_eski_parola: String,
+    tarayici_yeni_parola: String,
+    tarayici_ac_parola: String,
+    tarayici_dakika: u32,
 }
 
 impl Uygulama {
     fn yeni(cc: &eframe::CreationContext<'_>) -> Self {
         let temalar = sistem::temalar();
         let secili = sistem::ayarlar().get("TEMA").cloned().unwrap_or_default();
-        let t = temalar.iter().find(|t| t.kimlik == secili).unwrap_or(&temalar[0]).clone();
+        let t = temalar
+            .iter()
+            .find(|t| t.kimlik == secili)
+            .unwrap_or(&temalar[0])
+            .clone();
         renkleri_sec(&t);
         tema(&cc.egui_ctx);
         let mut u = Uygulama {
@@ -158,6 +177,10 @@ impl Uygulama {
             guncelleme: Ok(Default::default()),
             yeniden_baslat_oner: false,
             imaja_don_sor: false,
+            tarayici_eski_parola: String::new(),
+            tarayici_yeni_parola: String::new(),
+            tarayici_ac_parola: String::new(),
+            tarayici_dakika: 30,
         };
         u.yenile();
         // `armonia-ayarlar yazicilar` gibi doğrudan bölümle açılabilsin (dock kutucuğu)
@@ -169,6 +192,7 @@ impl Uygulama {
                 "usb" => Bolum::Usb,
                 // Üst çubuktaki "Güncelleme" göstergesi buraya açar
                 "cokluuyap" => Bolum::CokluUyap,
+                "tarayici" => Bolum::Tarayici,
                 "gorunum" => Bolum::Gorunum,
                 "hakkinda" => Bolum::Hakkinda,
                 _ => Bolum::Klavye,
@@ -180,8 +204,16 @@ impl Uygulama {
 
     fn yenile(&mut self) {
         let a = sistem::ayarlar();
-        self.klavye = a.get("KLAVYE").cloned().filter(|k| k == "f").unwrap_or_else(|| "q".into());
-        self.kilit_dk = a.get("KILIT_DK").and_then(|d| d.parse().ok()).filter(|d| [5, 10, 15, 30].contains(d)).unwrap_or(10);
+        self.klavye = a
+            .get("KLAVYE")
+            .cloned()
+            .filter(|k| k == "f")
+            .unwrap_or_else(|| "q".into());
+        self.kilit_dk = a
+            .get("KILIT_DK")
+            .and_then(|d| d.parse().ok())
+            .filter(|d| [5, 10, 15, 30].contains(d))
+            .unwrap_or(10);
         self.yazicilar = sistem::yazicilar();
         self.ag = sistem::ag_durumu();
         self.kayitli = sistem::kayitli_wifi();
@@ -191,7 +223,12 @@ impl Uygulama {
         }
     }
 
-    fn is_baslat(&mut self, metin: &str, ctx: &egui::Context, is: impl FnOnce() -> IsSonucu + Send + 'static) {
+    fn is_baslat(
+        &mut self,
+        metin: &str,
+        ctx: &egui::Context,
+        is: impl FnOnce() -> IsSonucu + Send + 'static,
+    ) {
         let (t, r) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -208,7 +245,9 @@ impl Uygulama {
         self.is_kanali = None;
         match s {
             IsSonucu::Tarama(Ok(l)) => self.wifi = l,
-            IsSonucu::Tarama(Err(e)) => self.mesaj = Some((false, format!("Ağlar taranamadı: {e}"))),
+            IsSonucu::Tarama(Err(e)) => {
+                self.mesaj = Some((false, format!("Ağlar taranamadı: {e}")))
+            }
             IsSonucu::Baglanti(r, ad) => {
                 if r.is_ok() {
                     self.secili_ag = None;
@@ -247,7 +286,11 @@ impl Uygulama {
 
 fn tema(ctx: &egui::Context) {
     let c = r();
-    let mut v = if c.koyu { egui::Visuals::dark() } else { egui::Visuals::light() };
+    let mut v = if c.koyu {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
     v.panel_fill = c.arka;
     v.window_fill = c.kart;
     v.extreme_bg_color = if c.koyu { c.arka } else { Color32::WHITE };
@@ -265,9 +308,12 @@ fn tema(ctx: &egui::Context) {
     ctx.set_visuals(v);
     ctx.style_mut(|s| {
         use egui::{FontId, TextStyle};
-        s.text_styles.insert(TextStyle::Body, FontId::proportional(15.0));
-        s.text_styles.insert(TextStyle::Button, FontId::proportional(15.0));
-        s.text_styles.insert(TextStyle::Heading, FontId::proportional(22.0));
+        s.text_styles
+            .insert(TextStyle::Body, FontId::proportional(15.0));
+        s.text_styles
+            .insert(TextStyle::Button, FontId::proportional(15.0));
+        s.text_styles
+            .insert(TextStyle::Heading, FontId::proportional(22.0));
         s.spacing.item_spacing = egui::vec2(8.0, 8.0);
         s.spacing.button_padding = egui::vec2(10.0, 5.0);
     });
@@ -300,10 +346,18 @@ impl eframe::App for Uygulama {
             .exact_width(200.0)
             .frame(egui::Frame::none().fill(r().kart).inner_margin(14.0))
             .show(ctx, |ui| {
-                ui.label(RichText::new("Ayarlar").size(22.0).strong().color(r().baslik));
+                ui.label(
+                    RichText::new("Ayarlar")
+                        .size(22.0)
+                        .strong()
+                        .color(r().baslik),
+                );
                 ui.add_space(10.0);
                 for (b, ad) in BOLUMLER {
-                    let r = ui.add_sized([170.0, 34.0], egui::SelectableLabel::new(self.bolum == b, RichText::new(ad).size(16.0)));
+                    let r = ui.add_sized(
+                        [170.0, 34.0],
+                        egui::SelectableLabel::new(self.bolum == b, RichText::new(ad).size(16.0)),
+                    );
                     if r.clicked() && self.bolum != b {
                         self.bolum = b;
                         self.mesaj = None;
@@ -312,25 +366,28 @@ impl eframe::App for Uygulama {
                     }
                 }
             });
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(r().arka).inner_margin(20.0)).show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                // Kaydırma çubuğuna yer kalsın (yoksa kartların sağ kenarı kırpılıyor)
-                ui.set_max_width((ui.available_width() - 16.0).min(720.0));
-                match self.bolum {
-                    Bolum::Ag => self.ag(ui),
-                    Bolum::Klavye => self.klavye_bolumu(ui),
-                    Bolum::Ekran => self.ekran(ui),
-                    Bolum::Yazicilar => self.yazici_bolumu(ui),
-                    Bolum::Usb => self.usb(ui),
-                    Bolum::CokluUyap => self.coklu_uyap(ui),
-                    Bolum::Gorunum => self.gorunum(ui),
-                    Bolum::Hakkinda => self.hakkinda(ui),
-                }
-                if let Some((iyi, m)) = &self.mesaj {
-                    ui.label(RichText::new(m).color(if *iyi { r().baslik } else { UYARI }));
-                }
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(r().arka).inner_margin(20.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Kaydırma çubuğuna yer kalsın (yoksa kartların sağ kenarı kırpılıyor)
+                    ui.set_max_width((ui.available_width() - 16.0).min(720.0));
+                    match self.bolum {
+                        Bolum::Ag => self.ag(ui),
+                        Bolum::Klavye => self.klavye_bolumu(ui),
+                        Bolum::Ekran => self.ekran(ui),
+                        Bolum::Yazicilar => self.yazici_bolumu(ui),
+                        Bolum::Usb => self.usb(ui),
+                        Bolum::CokluUyap => self.coklu_uyap(ui),
+                        Bolum::Tarayici => self.tarayici_bolumu(ui),
+                        Bolum::Gorunum => self.gorunum(ui),
+                        Bolum::Hakkinda => self.hakkinda(ui),
+                    }
+                    if let Some((iyi, m)) = &self.mesaj {
+                        ui.label(RichText::new(m).color(if *iyi { r().baslik } else { UYARI }));
+                    }
+                });
             });
-        });
     }
 }
 
@@ -357,10 +414,20 @@ impl Uygulama {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Kablosuz (Wi-Fi)").strong());
                     let mut acik = durum.wifi_acik;
-                    if ui.add_enabled(!mesgul, egui::Checkbox::new(&mut acik, "Açık")).changed() {
+                    if ui
+                        .add_enabled(!mesgul, egui::Checkbox::new(&mut acik, "Açık"))
+                        .changed()
+                    {
                         let r = sistem::wifi_radyo(acik);
                         self.wifi.clear();
-                        self.sonuc(r, if acik { "Wi-Fi açıldı." } else { "Wi-Fi kapatıldı." });
+                        self.sonuc(
+                            r,
+                            if acik {
+                                "Wi-Fi açıldı."
+                            } else {
+                                "Wi-Fi kapatıldı."
+                            },
+                        );
                     }
                 });
                 if !durum.wifi_acik {
@@ -371,8 +438,13 @@ impl Uygulama {
                     None => ui.label(RichText::new("Bağlı değil").color(r().soluk)),
                 };
                 ui.horizontal(|ui| {
-                    if ui.add_enabled(!mesgul, egui::Button::new("Ağları tara")).clicked() {
-                        self.is_baslat("Ağlar taranıyor…", ui.ctx(), || IsSonucu::Tarama(sistem::wifi_tara()));
+                    if ui
+                        .add_enabled(!mesgul, egui::Button::new("Ağları tara"))
+                        .clicked()
+                    {
+                        self.is_baslat("Ağlar taranıyor…", ui.ctx(), || {
+                            IsSonucu::Tarama(sistem::wifi_tara())
+                        });
                     }
                     if mesgul {
                         ui.spinner();
@@ -397,9 +469,15 @@ impl Uygulama {
                         if a.bagli {
                             ui.label(RichText::new("bağlı").size(12.0).color(r().baslik));
                         } else if self.secili_ag.as_deref() != Some(&a.ssid)
-                            && ui.add_enabled(!mesgul, egui::Button::new("Bağlan").small()).clicked()
+                            && ui
+                                .add_enabled(!mesgul, egui::Button::new("Bağlan").small())
+                                .clicked()
                         {
-                            let kayit = self.kayitli.iter().find(|(ad, _)| *ad == a.ssid).map(|(_, u)| u.clone());
+                            let kayit = self
+                                .kayitli
+                                .iter()
+                                .find(|(ad, _)| *ad == a.ssid)
+                                .map(|(_, u)| u.clone());
                             match (kayit, a.guvenlik) {
                                 (Some(u), _) => {
                                     let ad = a.ssid.clone();
@@ -407,7 +485,9 @@ impl Uygulama {
                                         IsSonucu::Baglanti(sistem::kayitliya_baglan(&u), ad)
                                     });
                                 }
-                                (None, "acik") => baglan = Some((a.ssid.clone(), String::new(), "acik")),
+                                (None, "acik") => {
+                                    baglan = Some((a.ssid.clone(), String::new(), "acik"))
+                                }
                                 (None, _) => {
                                     self.secili_ag = Some(a.ssid.clone());
                                     self.parola.clear();
@@ -418,10 +498,19 @@ impl Uygulama {
                     if self.secili_ag.as_deref() == Some(&a.ssid) {
                         ui.horizontal(|ui| {
                             ui.label("Parola");
-                            let r = ui.add(egui::TextEdit::singleline(&mut self.parola).password(true).desired_width(220.0));
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut self.parola)
+                                    .password(true)
+                                    .desired_width(220.0),
+                            );
                             let gecerli = (8..=63).contains(&self.parola.len());
-                            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            if ui.add_enabled(gecerli && !mesgul, egui::Button::new("Bağlan")).clicked() || (enter && gecerli) {
+                            let enter =
+                                r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if ui
+                                .add_enabled(gecerli && !mesgul, egui::Button::new("Bağlan"))
+                                .clicked()
+                                || (enter && gecerli)
+                            {
                                 baglan = Some((a.ssid.clone(), self.parola.clone(), a.guvenlik));
                             }
                             if ui.button("Vazgeç").clicked() {
@@ -446,7 +535,10 @@ impl Uygulama {
                 for (ad, uuid) in &self.kayitli {
                     ui.horizontal(|ui| {
                         ui.label(ad);
-                        if ui.add_enabled(!mesgul, egui::Button::new("Unut").small()).clicked() {
+                        if ui
+                            .add_enabled(!mesgul, egui::Button::new("Unut").small())
+                            .clicked()
+                        {
                             unut = Some((ad.clone(), uuid.clone()));
                         }
                     });
@@ -474,14 +566,21 @@ impl Uygulama {
             let mut secim = self.klavye.clone();
             ui.radio_value(&mut secim, "q".to_string(), "Türkçe Q");
             ui.radio_value(&mut secim, "f".to_string(), "Türkçe F");
-            aciklama(ui, "Değişiklik hemen uygulanır (masaüstü ve metin giriş ekranı).");
+            aciklama(
+                ui,
+                "Değişiklik hemen uygulanır (masaüstü ve metin giriş ekranı).",
+            );
             if secim != self.klavye {
                 let r = sistem::yardimci("klavye", &secim);
                 if r.is_ok() {
                     sistem::labwc_yenile();
                     sistem::ust_cubuk_yenile();
                 }
-                let ad = if secim == "f" { "Türkçe F" } else { "Türkçe Q" };
+                let ad = if secim == "f" {
+                    "Türkçe F"
+                } else {
+                    "Türkçe Q"
+                };
                 self.sonuc(r, &format!("Klavye düzeni: {ad}"));
             }
         });
@@ -540,10 +639,18 @@ impl Uygulama {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(y.ad.replace('_', " ")).strong().size(16.0));
                     if y.varsayilan {
-                        ui.label(RichText::new("varsayılan").size(12.0).color(r().vurgu_uzeri).background_color(r().vurgu));
+                        ui.label(
+                            RichText::new("varsayılan")
+                                .size(12.0)
+                                .color(r().vurgu_uzeri)
+                                .background_color(r().vurgu),
+                        );
                     }
                 });
-                aciklama(ui, &format!("{} · {}", sistem::baglanti_turu(&y.adres), y.durum));
+                aciklama(
+                    ui,
+                    &format!("{} · {}", sistem::baglanti_turu(&y.adres), y.durum),
+                );
                 ui.horizontal(|ui| {
                     if ui.button("Deneme sayfası").clicked() {
                         islem = Some(("deneme", y.ad.clone()));
@@ -566,8 +673,13 @@ impl Uygulama {
             });
         }
         match islem {
-            Some(("deneme", ad)) => self.sonuc(sistem::deneme_sayfasi(&ad), "Deneme sayfası gönderildi."),
-            Some(("varsayilan", ad)) => self.sonuc(sistem::yardimci("yazici-varsayilan", &ad), "Varsayılan yazıcı değişti."),
+            Some(("deneme", ad)) => {
+                self.sonuc(sistem::deneme_sayfasi(&ad), "Deneme sayfası gönderildi.")
+            }
+            Some(("varsayilan", ad)) => self.sonuc(
+                sistem::yardimci("yazici-varsayilan", &ad),
+                "Varsayılan yazıcı değişti.",
+            ),
             Some(("sil", ad)) => {
                 self.silinecek = None;
                 self.sonuc(sistem::yardimci("yazici-sil", &ad), "Yazıcı silindi.");
@@ -589,6 +701,74 @@ impl Uygulama {
         });
     }
 
+    fn tarayici_bolumu(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Tarayıcı filtresi");
+        aciklama(
+            ui,
+            "Armonia tarayıcısı yalnız resmî/adli siteleri açar. Bu filtre parolayla geçici olarak \
+             kapatılabilir; süre sonunda kendiliğinden geri kilitlenir.",
+        );
+        let acik = sistem::tarayici_acik_mi();
+        kart(ui, |ui| {
+            ui.label(
+                RichText::new(if acik {
+                    "Durum: AÇIK"
+                } else {
+                    "Durum: Kilitli"
+                })
+                .strong()
+                .color(if acik { UYARI } else { r().baslik }),
+            );
+            if acik {
+                aciklama(
+                    ui,
+                    "Filtre açık; belirlenen süre dolunca ya da aşağıdan hemen kilitlenebilir.",
+                );
+                if ui.button("Şimdi kilitle").clicked() {
+                    let r = sistem::tarayici_kilitle();
+                    self.sonuc(r, "Filtre kilitlendi.");
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label("Parola:");
+                    ui.add(egui::TextEdit::singleline(&mut self.tarayici_ac_parola).password(true));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Süre:");
+                    for dk in [15, 30, 60, 120] {
+                        ui.radio_value(&mut self.tarayici_dakika, dk, format!("{dk} dakika"));
+                    }
+                });
+                if ui.button("Filtreyi aç").clicked() {
+                    let r = sistem::tarayici_ac(self.tarayici_dakika, &self.tarayici_ac_parola);
+                    self.tarayici_ac_parola.clear();
+                    self.sonuc(r, &format!("Filtre {} dakika açık.", self.tarayici_dakika));
+                }
+            }
+        });
+        kart(ui, |ui| {
+            ui.label(RichText::new("Parola belirle / değiştir").strong());
+            aciklama(ui, "İlk kurulumda eski parola alanı boş bırakılır.");
+            ui.horizontal(|ui| {
+                ui.label("Eski parola:");
+                ui.add(egui::TextEdit::singleline(&mut self.tarayici_eski_parola).password(true));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Yeni parola:");
+                ui.add(egui::TextEdit::singleline(&mut self.tarayici_yeni_parola).password(true));
+            });
+            if ui.button("Kaydet").clicked() {
+                let r = sistem::tarayici_parola_belirle(
+                    &self.tarayici_eski_parola,
+                    &self.tarayici_yeni_parola,
+                );
+                self.tarayici_eski_parola.clear();
+                self.tarayici_yeni_parola.clear();
+                self.sonuc(r, "Parola kaydedildi.");
+            }
+        });
+    }
+
     fn usb(&mut self, ui: &mut egui::Ui) {
         ui.heading("USB aygıtları");
         kart(ui, |ui| {
@@ -602,7 +782,10 @@ impl Uygulama {
         });
         kart(ui, |ui| {
             ui.label(RichText::new("Her zaman izin verilen aygıtlar").strong());
-            aciklama(ui, "Kalıcı izin listesi bir sonraki adımda eklenecek (diske kurulan sistemde).");
+            aciklama(
+                ui,
+                "Kalıcı izin listesi bir sonraki adımda eklenecek (diske kurulan sistemde).",
+            );
         });
     }
 
@@ -658,32 +841,58 @@ impl Uygulama {
                 return;
             }
             if !d.katman {
-                aciklama(ui, "Bu sistemde Çoklu UYAP yalnız Armonia imajıyla birlikte güncellenir.");
+                aciklama(
+                    ui,
+                    "Bu sistemde Çoklu UYAP yalnız Armonia imajıyla birlikte güncellenir.",
+                );
                 return;
             }
-            egui::Grid::new("guncelleme").num_columns(2).spacing([16.0, 6.0]).show(ui, |ui| {
-                let satir = |ui: &mut egui::Ui, k: &str, v: String| {
-                    ui.label(RichText::new(k).color(r().soluk));
-                    ui.label(v);
-                    ui.end_row();
-                };
-                satir(ui, "İmajdaki sürüm", d.imaj.clone().unwrap_or_else(|| "bilinmiyor".into()));
-                satir(ui, "Kurulu güncelleme", d.etkin.clone().unwrap_or_else(|| "yok (imajdaki sürüm)".into()));
-                if let Some(z) = &d.son_kurulum {
-                    satir(ui, "Son kurulum", guncelleme::yerel_zaman(z));
-                }
-                // Zamanı ağa çıkan denetleyici yazar; imzalı değildir (denetçi 24.11 O-2)
-                satir(
-                    ui,
-                    "Son denetim",
-                    d.son_denetim.as_deref().map(|z| format!("{} (denetleyicinin bildirdiği)", guncelleme::yerel_zaman(z))).unwrap_or_else(|| "henüz yok".into()),
-                );
-            });
+            egui::Grid::new("guncelleme")
+                .num_columns(2)
+                .spacing([16.0, 6.0])
+                .show(ui, |ui| {
+                    let satir = |ui: &mut egui::Ui, k: &str, v: String| {
+                        ui.label(RichText::new(k).color(r().soluk));
+                        ui.label(v);
+                        ui.end_row();
+                    };
+                    satir(
+                        ui,
+                        "İmajdaki sürüm",
+                        d.imaj.clone().unwrap_or_else(|| "bilinmiyor".into()),
+                    );
+                    satir(
+                        ui,
+                        "Kurulu güncelleme",
+                        d.etkin
+                            .clone()
+                            .unwrap_or_else(|| "yok (imajdaki sürüm)".into()),
+                    );
+                    if let Some(z) = &d.son_kurulum {
+                        satir(ui, "Son kurulum", guncelleme::yerel_zaman(z));
+                    }
+                    // Zamanı ağa çıkan denetleyici yazar; imzalı değildir (denetçi 24.11 O-2)
+                    satir(
+                        ui,
+                        "Son denetim",
+                        d.son_denetim
+                            .as_deref()
+                            .map(|z| {
+                                format!(
+                                    "{} (denetleyicinin bildirdiği)",
+                                    guncelleme::yerel_zaman(z)
+                                )
+                            })
+                            .unwrap_or_else(|| "henüz yok".into()),
+                    );
+                });
             if let Some(n) = &d.etkin_red {
                 ui.label(
-                    RichText::new(format!("Kurulu güncelleme kullanılmıyor, Çoklu UYAP imajdaki sürümle açılır: {n}"))
-                        .size(13.0)
-                        .color(UYARI),
+                    RichText::new(format!(
+                        "Kurulu güncelleme kullanılmıyor, Çoklu UYAP imajdaki sürümle açılır: {n}"
+                    ))
+                    .size(13.0)
+                    .color(UYARI),
                 );
             }
             if d.imaja_don {
@@ -696,10 +905,18 @@ impl Uygulama {
                 );
             }
             if let Some(h) = &d.son_denetim_hata {
-                ui.label(RichText::new(format!("Son denetim başarısız: {h}")).size(13.0).color(UYARI));
+                ui.label(
+                    RichText::new(format!("Son denetim başarısız: {h}"))
+                        .size(13.0)
+                        .color(UYARI),
+                );
             }
             if let Some(h) = &d.teklif_hata {
-                ui.label(RichText::new(format!("Güncelleme bilgisi doğrulanamadı: {h}")).size(13.0).color(UYARI));
+                ui.label(
+                    RichText::new(format!("Güncelleme bilgisi doğrulanamadı: {h}"))
+                        .size(13.0)
+                        .color(UYARI),
+                );
             }
             ui.add_space(4.0);
             match &d.teklif {
@@ -738,7 +955,10 @@ impl Uygulama {
                 ),
             }
             ui.horizontal(|ui| {
-                if ui.add_enabled(!mesgul, egui::Button::new("Şimdi denetle")).clicked() {
+                if ui
+                    .add_enabled(!mesgul, egui::Button::new("Şimdi denetle"))
+                    .clicked()
+                {
                     eylem = Some("denetle");
                 }
                 if mesgul {
@@ -770,7 +990,10 @@ impl Uygulama {
                 );
                 if self.imaja_don_sor {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Çoklu UYAP kapatılıp imajdaki sürümle açılsın mı?").color(UYARI));
+                        ui.label(
+                            RichText::new("Çoklu UYAP kapatılıp imajdaki sürümle açılsın mı?")
+                                .color(UYARI),
+                        );
                         if ui.button("Evet").clicked() {
                             eylem = Some("imaja-don");
                         }
@@ -778,21 +1001,34 @@ impl Uygulama {
                             eylem = Some("imaja-vazgec");
                         }
                     });
-                } else if ui.add_enabled(!mesgul, egui::Button::new("Bu açılışta imajdaki sürümle aç")).clicked() {
+                } else if ui
+                    .add_enabled(
+                        !mesgul,
+                        egui::Button::new("Bu açılışta imajdaki sürümle aç"),
+                    )
+                    .clicked()
+                {
                     eylem = Some("imaja-sor");
                 }
             });
         }
         match eylem {
-            Some("denetle") => self.is_baslat("Denetleniyor…", ui.ctx(), || IsSonucu::Denetim(guncelleme::denetle())),
+            Some("denetle") => self.is_baslat("Denetleniyor…", ui.ctx(), || {
+                IsSonucu::Denetim(guncelleme::denetle())
+            }),
             Some("kur") => {
                 self.yeniden_baslat_oner = false;
-                self.is_baslat("İndiriliyor ve doğrulanıyor…", ui.ctx(), || IsSonucu::Kurulum(guncelleme::indir_ve_kur()));
+                self.is_baslat("İndiriliyor ve doğrulanıyor…", ui.ctx(), || {
+                    IsSonucu::Kurulum(guncelleme::indir_ve_kur())
+                });
             }
             Some("yeniden") => {
                 self.yeniden_baslat_oner = false;
                 self.is_baslat("Çoklu UYAP yeniden başlatılıyor…", ui.ctx(), || {
-                    IsSonucu::Islem(guncelleme::cokluuyap_yeniden_baslat(), "Çoklu UYAP yeni sürümle açılıyor.".into())
+                    IsSonucu::Islem(
+                        guncelleme::cokluuyap_yeniden_baslat(),
+                        "Çoklu UYAP yeni sürümle açılıyor.".into(),
+                    )
                 });
             }
             Some("sonra") => self.yeniden_baslat_oner = false,
@@ -808,7 +1044,10 @@ impl Uygulama {
                             Ok(())
                         }
                     });
-                    IsSonucu::Islem(r, "Bu açılışta Çoklu UYAP imajdaki sürümle açılacak.".into())
+                    IsSonucu::Islem(
+                        r,
+                        "Bu açılışta Çoklu UYAP imajdaki sürümle açılacak.".into(),
+                    )
                 });
             }
             _ => {}
@@ -823,21 +1062,43 @@ impl Uygulama {
             aciklama(ui, "Üst çubuk, dock, pencere çerçeveleri, menü, bildirimler ve bu pencere seçilen temaya geçer. Çoklu UYAP da aynı temayla açılır.");
             ui.add_space(4.0);
             for t in &self.temalar {
-                let (alan, cevap) = ui.allocate_exact_size(egui::vec2(ui.available_width().min(360.0), 34.0), egui::Sense::click());
+                let (alan, cevap) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width().min(360.0), 34.0),
+                    egui::Sense::click(),
+                );
                 let c = r();
                 if cevap.hovered() || t.kimlik == self.tema {
-                    ui.painter().rect_filled(alan, 8.0, if t.kimlik == self.tema { c.vurgu_zemin } else { c.hap });
+                    ui.painter().rect_filled(
+                        alan,
+                        8.0,
+                        if t.kimlik == self.tema {
+                            c.vurgu_zemin
+                        } else {
+                            c.hap
+                        },
+                    );
                 }
                 // Örnek: tema zemini üstünde vurgu rengi (Çoklu UYAP'taki renkli nokta gibi)
                 let m = egui::pos2(alan.min.x + 20.0, alan.center().y);
                 ui.painter().circle_filled(m, 10.0, hex(t.renk[1]));
-                ui.painter().circle_stroke(m, 10.0, egui::Stroke::new(1.0_f32, hex(t.renk[3])));
+                ui.painter()
+                    .circle_stroke(m, 10.0, egui::Stroke::new(1.0_f32, hex(t.renk[3])));
                 ui.painter().circle_filled(m, 5.5, hex(t.renk[5]));
-                ui.painter().text(egui::pos2(alan.min.x + 40.0, alan.center().y), egui::Align2::LEFT_CENTER, &t.ad,
-                    egui::FontId::proportional(15.0), c.yazi);
+                ui.painter().text(
+                    egui::pos2(alan.min.x + 40.0, alan.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    &t.ad,
+                    egui::FontId::proportional(15.0),
+                    c.yazi,
+                );
                 if t.kimlik == self.tema {
-                    ui.painter().text(egui::pos2(alan.max.x - 12.0, alan.center().y), egui::Align2::RIGHT_CENTER, "✓",
-                        egui::FontId::proportional(15.0), c.baslik);
+                    ui.painter().text(
+                        egui::pos2(alan.max.x - 12.0, alan.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        "✓",
+                        egui::FontId::proportional(15.0),
+                        c.baslik,
+                    );
                 }
                 if cevap.clicked() && t.kimlik != self.tema {
                     secilen = Some(t.clone());
@@ -855,7 +1116,12 @@ impl Uygulama {
             self.sonuc(sonuc, &format!("Tema: {}", t.ad));
         }
         if self.canli {
-            kart(ui, |ui| aciklama(ui, "Deneme (canlı) sisteminde seçim bilgisayar kapanınca Armonia'ya döner."));
+            kart(ui, |ui| {
+                aciklama(
+                    ui,
+                    "Deneme (canlı) sisteminde seçim bilgisayar kapanınca Armonia'ya döner.",
+                )
+            });
         }
     }
 
@@ -863,13 +1129,22 @@ impl Uygulama {
         ui.heading("Hakkında");
         let b = self.bilgi.clone();
         kart(ui, |ui| {
-            egui::Grid::new("bilgi").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-                for (k, v) in [("Sistem", &b.sistem), ("İşlemci", &b.islemci), ("Bellek", &b.bellek), ("Disk", &b.disk), ("Çekirdek", &b.cekirdek)] {
-                    ui.label(RichText::new(k).color(r().soluk));
-                    ui.label(v.as_str());
-                    ui.end_row();
-                }
-            });
+            egui::Grid::new("bilgi")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    for (k, v) in [
+                        ("Sistem", &b.sistem),
+                        ("İşlemci", &b.islemci),
+                        ("Bellek", &b.bellek),
+                        ("Disk", &b.disk),
+                        ("Çekirdek", &b.cekirdek),
+                    ] {
+                        ui.label(RichText::new(k).color(r().soluk));
+                        ui.label(v.as_str());
+                        ui.end_row();
+                    }
+                });
         });
     }
 }
@@ -883,5 +1158,9 @@ fn main() -> eframe::Result<()> {
             .with_min_inner_size([620.0, 420.0]),
         ..Default::default()
     };
-    eframe::run_native("Ayarlar", secenekler, Box::new(|cc| Ok(Box::new(Uygulama::yeni(cc)))))
+    eframe::run_native(
+        "Ayarlar",
+        secenekler,
+        Box::new(|cc| Ok(Box::new(Uygulama::yeni(cc)))),
+    )
 }

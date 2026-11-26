@@ -12,7 +12,9 @@ D="${COKLUUYAP_DIZIN:-$EV/armonia-cikti/cokluuyap}"
 elf_mimari() {  # ELF e_machine (ofset 18): 3e00 = x86_64, b700 = aarch64
   case "$(od -An -tx1 -j18 -N2 "$1" 2>/dev/null | tr -d ' \n')" in 3e00) echo x86_64 ;; b700) echo aarch64 ;; *) echo bilinmiyor ;; esac
 }
-if [ ! -f "$D/uyap_app" ] || [ "$(elf_mimari "$D/uyap_app")" != "$MIMARI" ]; then
+# Kaynak ikiliden yeniyse de yeniden derlenir: 25.11'de kaynak degistigi halde imaja eski uyap_app girmisti
+eskimis() { [ -n "$(find "$KAYNAK/../Uyap Haricen Giriş/ruyap" -path '*/target' -prune -o -type f -newer "$D/uyap_app" -print -quit 2>/dev/null)" ]; }
+if [ ! -f "$D/uyap_app" ] || [ "$(elf_mimari "$D/uyap_app")" != "$MIMARI" ] || eskimis; then
   if [ -n "${SUDO_USER:-}" ] && [ -z "${COKLUUYAP_DIZIN:-}" ] && [ -x "$EV/.cargo/bin/cargo" ]; then
     echo "Coklu UYAP derleniyor (derle_uyap.sh, kullanici $SUDO_USER)"
     sudo -u "$SUDO_USER" env HOME="$EV" bash "$KAYNAK/derle_uyap.sh"
