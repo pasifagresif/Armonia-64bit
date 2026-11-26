@@ -420,7 +420,9 @@ impl Default for AppConfig {
             password_enc: String::new(),
             cert_id: String::new(),
             local_port: LOCAL_PORT,
-            auto_share: true,
+            // Yeni kurulum istemci başlar ("Var olan oturumu al" görünsün, 26.11.2026); sunucu girişte seçilir.
+            // Eski ayar dosyalarında alan hep yazılı olduğundan mevcut sunucular etkilenmez.
+            auto_share: false,
             lan_share: true,
             lan_share_varsayilan: true,
         }
@@ -1689,12 +1691,24 @@ impl UyapApp {
                 Self::check(&mut child_ui, &mut self.remember_var, "Bilgilerimi hatırla", enabled);
                 child_ui.add_space(6.0);
 
-                Self::check(
-                    &mut child_ui,
-                    &mut self.auto_share_var,
-                    "Bu bilgisayar ofis sunucusu olsun\n(girişte paylaşım kendiliğinden başlar)",
-                    enabled,
-                );
+                // Rol seçimi açıkça (26.11.2026): işaretli kutu her kurulumu sunucu yapıyor, istemci "Var olan
+                // oturumu al"ı hiç görmüyordu.
+                child_ui.label(egui::RichText::new("Bu bilgisayar").font(Fonts::small()).color(C::INK_SOFT()));
+                child_ui.add_enabled_ui(enabled, |ui| {
+                    let r_ist = ui.radio_value(
+                        &mut self.auto_share_var,
+                        false,
+                        egui::RichText::new("Ofisin açık UYAP oturumunu kullanır").font(Fonts::small()).color(C::INK()),
+                    );
+                    let r_sun = ui.radio_value(
+                        &mut self.auto_share_var,
+                        true,
+                        egui::RichText::new("Ofis sunucusu olur (e-imzayla bağlantıyı paylaşır)").font(Fonts::small()).color(C::INK()),
+                    );
+                    if r_ist.clicked() || r_sun.clicked() {
+                        cancel_auto = true;
+                    }
+                });
                 child_ui.add_space(6.0);
 
                 if self.auto_share_var {
@@ -2176,7 +2190,7 @@ impl UyapApp {
                                 ayrac(&mut cui);
                             }
                             // İstemcide oturum alınmamışsa aynı madde oturumu alır (uyap_ac → oturum_al)
-                            let ac_metni = if self.sunucu_mu() || self.oturum_dur.is_some() { "UYAP'ı aç" } else { "Var olan oturumu al" };
+                            let ac_metni = if self.is_sharing || self.oturum_dur.is_some() { "UYAP'ı aç" } else { "Var olan oturumu al" };
                             if panel_ogesi(&mut cui, ac_metni) { eylem = Some(5); }
                             if panel_ogesi(&mut cui, "Pencereyi aç") { eylem = Some(1); }
                             let tema_metni = if self.tepsi_tema_acik { "Tema  ▾" } else { "Tema  ▸" };
@@ -2289,7 +2303,7 @@ impl UyapApp {
                     ui.add_space(sol_pay);
                     ui.vertical(|ui| {
                         ui.set_width(kart_w);
-                        if !self.sunucu_mu() {
+                        if !self.is_sharing {
                             egui::Frame::none()
                                 .fill(C::CARD())
                                 .stroke(egui::Stroke::new(1.0, C::CARD_EDGE()))
@@ -2406,7 +2420,7 @@ impl UyapApp {
     /// Tek satırlık bağlantı durumu: bağlanıyor (dönen yay) / kuruldu / hata kodu.
     /// Tepsi menüsünde PIN + "Bağlantıyı paylaş" gösterilsin mi (girişli sunucu, paylaşım kapalı).
     fn tepsi_pin_goster(&self) -> bool {
-        self.screen == ScreenMode::Dashboard && self.sunucu_mu() && !self.is_sharing
+        self.screen == ScreenMode::Dashboard && self.sunucu_mu() && !self.is_sharing && self.oturum_dur.is_none()
     }
 
     fn tepsi_panel_h(&self) -> f32 {
@@ -2432,11 +2446,18 @@ impl UyapApp {
             crate::tepsi::goster();
             return;
         }
-        if self.sunucu_mu() {
+        if self.is_sharing {
             uyap_tarayicida_ac(Some(self.log_tx.clone()));
         } else {
             self.oturum_al();
         }
+    }
+
+    /// Durum kutusu istemci gözüyle mi çizilsin: paylaşım yokken istemcide hep; sunucu seçili bilgisayarda da
+    /// ofis oturumu alınmışsa / alınıyorsa ya da sonucu bekleniyorsa.
+    fn istemci_gorunumu(&self) -> bool {
+        !self.is_sharing
+            && (!self.cfg.auto_share || self.oturum_dur.is_some() || self.oturum_aliniyor() || self.oturum_mesaj.is_some())
     }
 
     fn web_sitesini_ac(&self) {
@@ -2605,7 +2626,7 @@ impl UyapApp {
                     ui.add_space(11.0);
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new("Çoklu UYAP").font(Fonts::card_t()).color(C::INK()));
-                        let rol = if self.sunucu_mu() { "Ofis sunucusu" } else { "İstemci" };
+                        let rol = if self.sunucu_mu() && self.oturum_dur.is_none() { "Ofis sunucusu" } else { "İstemci" };
                         ui.label(
                             egui::RichText::new(format!("{}@{} · {rol}", self.username, self.office_code))
                                 .font(Fonts::small())
@@ -2637,7 +2658,7 @@ impl UyapApp {
                 self.buyuk_durum(&mut c);
                 c.add_space(14.0);
 
-                if self.sunucu_mu() {
+                if self.sunucu_mu() && self.oturum_dur.is_none() {
                     if self.is_sharing {
                         if RoundButton::new("UYAP'ı aç")
                             .kind(ButtonKind::Primary)
@@ -2672,6 +2693,13 @@ impl UyapApp {
                         {
                             self.start_sharing();
                         }
+                        // Sunucu seçili ama paylaşım kapalı: ofiste başka bilgisayar paylaşıyorsa onun oturumu alınır.
+                        c.add_space(10.0);
+                        c.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new("ya da").font(Fonts::small()).color(C::INK_FAINT()));
+                        });
+                        c.add_space(6.0);
+                        self.oturum_dugmeleri(&mut c);
                     }
                 } else {
                     self.oturum_dugmeleri(&mut c);
@@ -2722,7 +2750,7 @@ impl UyapApp {
         const YESIL: egui::Color32 = egui::Color32::from_rgb(0x2E, 0x8B, 0x57);
         const SARI: egui::Color32 = egui::Color32::from_rgb(0xD4, 0xA0, 0x17);
         const KIRMIZI: egui::Color32 = egui::Color32::from_rgb(0xC6, 0x3B, 0x2F);
-        let (renk, baslik, ayrinti, doner): (egui::Color32, String, String, bool) = if !self.sunucu_mu() {
+        let (renk, baslik, ayrinti, doner): (egui::Color32, String, String, bool) = if self.istemci_gorunumu() {
             if self.oturum_dur.is_some() {
                 let mut a = format!("Yerel ağdan bağlı ({}). UYAP bu bilgisayarda 127.0.0.1:8800 üzerinden açılır.", self.oturum_ip);
                 if let Some((_, m)) = &self.oturum_mesaj {
