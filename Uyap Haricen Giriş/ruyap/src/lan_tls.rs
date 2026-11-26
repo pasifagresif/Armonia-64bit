@@ -156,6 +156,55 @@ pub fn sertifika_hazirla(ips: &[String]) -> Result<(PathBuf, PathBuf, String), S
     Ok((sert_yol, anahtar_yol, iz))
 }
 
+// ── Windows güvenlik duvarı (26.11.2026) ─────────────────────────────────────────────────────
+// Yerel ağ kapısı 0.0.0.0:8843'te dinler; Windows gelen bağlantıyı kuralsız engeller ("Var olan oturumu al" diğer
+// bilgisayarlardan çalışmaz). MSI perUser (UAC'siz) olduğundan kuralı kurulum ekleyemez: ofis sunucusu yerel ağ
+// erişimiyle paylaşımı başlatırken kural yoksa program kendini bir kez yönetici olarak çalıştırıp ekler
+// (`--sira-yonetici lan-guvenlik-duvari`, sira_eslestirme::yonetici_main). Yalnız özel ağ profili. Ad ASCII:
+// netsh adı konsol kod sayfasıyla geçirir.
+
+pub const GUVENLIK_DUVARI_KURALI: &str = "Coklu UYAP yerel ag kapisi (TCP 8843)";
+
+#[cfg(windows)]
+fn netsh(args: &[&str]) -> std::io::Result<std::process::Output> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("netsh").args(args).creation_flags(0x0800_0000).output()   // CREATE_NO_WINDOW
+}
+
+/// Kural var mı (Windows dışında her zaman true: bu güvenlik duvarı yok).
+pub fn guvenlik_duvari_var() -> bool {
+    #[cfg(windows)]
+    {
+        netsh(&["advfirewall", "firewall", "show", "rule", &format!("name={GUVENLIK_DUVARI_KURALI}")])
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+/// Kuralı (yeniden) ekler. Yönetici yetkisi gerekir.
+pub fn guvenlik_duvari_kur() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let ad = format!("name={GUVENLIK_DUVARI_KURALI}");
+        let _ = netsh(&["advfirewall", "firewall", "delete", "rule", &ad]);
+        let port = format!("localport={}", *LAN_TLS_PORT);
+        let o = netsh(&["advfirewall", "firewall", "add", "rule", &ad, "dir=in", "action=allow", "protocol=TCP", &port, "profile=private"])
+            .map_err(|e| format!("netsh çalıştırılamadı: {e}"))?;
+        if !o.status.success() {
+            return Err(format!("Güvenlik duvarı kuralı eklenemedi: {}", String::from_utf8_lossy(&o.stdout)));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 // ── Bilet + parmak izi ────────────────────────────────────────────────────────────────
 
 pub fn bilet_birlestir(bilet: &str, izi: &str) -> String {

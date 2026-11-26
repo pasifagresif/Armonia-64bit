@@ -491,6 +491,8 @@ pub fn yonetici_main(args: &[String]) -> i32 {
             }
         }
         "bot-kaldir" | "bot_kaldir" => bot_kaldir(),
+        // Ofis sunucusunun yerel ağ kapısı (8843; "Var olan oturumu al"), bkz. lan_tls::guvenlik_duvari_kur
+        "lan-guvenlik-duvari" => crate::lan_tls::guvenlik_duvari_kur(),
         other => Err(format!("Bilinmeyen yönetici komutu: {}", other)),
     };
     match res {

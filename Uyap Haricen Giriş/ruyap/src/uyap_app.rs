@@ -405,6 +405,9 @@ pub struct AppConfig {
     pub local_port: u16,
     pub auto_share: bool,
     pub lan_share: bool,
+    /// "Yerel ağdan doğrudan erişim" varsayılan açık (26.11.2026, "Var olan oturumu al" için): eski ayar dosyasında
+    /// bu alan yoksa lan_share bir kez açılır, sonra kullanıcının seçimi korunur.
+    pub lan_share_varsayilan: bool,
 }
 
 impl Default for AppConfig {
@@ -418,7 +421,8 @@ impl Default for AppConfig {
             cert_id: String::new(),
             local_port: LOCAL_PORT,
             auto_share: true,
-            lan_share: false,
+            lan_share: true,
+            lan_share_varsayilan: true,
         }
     }
 }
@@ -450,7 +454,18 @@ pub fn load_config() -> AppConfig {
         }
     }
 
-    if had_pin_enc {
+    // serde(default) eksik alanı AppConfig::default()'tan doldurur: eski dosyada alan yoksa true gelir ve dosyada
+    // yazılı lan_share=false kalırdı. Alanın dosyada gerçekten olup olmadığına bakılır.
+    let alan_vardi = path.exists()
+        && fs::read_to_string(&path).ok().and_then(|r| serde_json::from_str::<Value>(&r).ok())
+            .is_some_and(|v| v.get("lan_share_varsayilan").is_some());
+    let mut kaydet = had_pin_enc;
+    if !alan_vardi {
+        cfg.lan_share = true;
+        cfg.lan_share_varsayilan = true;
+        kaydet = true;
+    }
+    if kaydet {
         save_config(&cfg);
     }
 
@@ -842,6 +857,13 @@ pub struct UyapApp {
     share_stop_tx: Option<tokio::sync::oneshot::Sender<()>>,
     share_exit_rx: Option<Receiver<()>>,
 
+    // Var olan oturumu al (istemci; oturum_al.rs): yerel ağdaysa 127.0.0.1:8800 vekili, değilse cokluuyap.com
+    oturum_rx: Option<Receiver<crate::oturum_al::Sonuc>>,
+    oturum_dur: Option<tokio::sync::oneshot::Sender<()>>,
+    oturum_ip: String,
+    /// Son sonuç: (hata mı, metin)
+    oturum_mesaj: Option<(bool, String)>,
+
     // Alt pencereler
     sira_sekmesi: SiraKapisiSekmesi,
     bot_kurulum: Option<BotKurulumPenceresi>,
@@ -905,6 +927,11 @@ impl UyapApp {
             share_status_color: C::INK_FAINT(),
             share_stop_tx: None,
             share_exit_rx: None,
+
+            oturum_rx: None,
+            oturum_dur: None,
+            oturum_ip: String::new(),
+            oturum_mesaj: None,
 
             sira_sekmesi: SiraKapisiSekmesi::default(),
             bot_kurulum: None,
@@ -1163,8 +1190,27 @@ impl UyapApp {
             return;
         }
 
+        // Bu bilgisayar başka bir ofisin oturumunu almışsa (istemci vekili 8800'de) önce bırakılır.
+        self.oturum_birak();
         self.is_sharing = true;
         self.save_dashboard_config();
+        // Yerel ağ kapısına diğer bilgisayarlar erişebilsin: Windows güvenlik duvarı kuralı yoksa bir kez yönetici
+        // onayıyla eklenir (MSI perUser olduğu için kurulum ekleyemiyor; bkz. lan_tls::guvenlik_duvari_kur).
+        if cfg!(windows) && self.lan_share_var {
+            let log_tx = self.log_tx.clone();
+            std::thread::spawn(move || {
+                if crate::lan_tls::guvenlik_duvari_var() {
+                    return;
+                }
+                let _ = log_tx.send("[i] Yerel ağ erişimi için Windows güvenlik duvarına izin isteniyor (yönetici onayı).".into());
+                let m = match crate::sira_eslestirme::yonetici_olarak_calistir(&["lan-guvenlik-duvari"]) {
+                    Ok(0) if crate::lan_tls::guvenlik_duvari_var() => "[+] Güvenlik duvarı: yerel ağ kapısına (TCP 8843, özel ağ) izin verildi.".to_string(),
+                    Ok(k) => format!("[!] Güvenlik duvarı kuralı eklenemedi (çıkış {k}); diğer bilgisayarlar yerel ağdan bağlanamaz, cokluuyap.com çalışır."),
+                    Err(_) => "[!] Yönetici onayı verilmedi: diğer bilgisayarlar yerel ağdan bağlanamaz, cokluuyap.com çalışır.".to_string(),
+                };
+                let _ = log_tx.send(m);
+            });
+        }
         if self.cfg.auto_share {
             let log_tx = self.log_tx.clone();
             sync_startup_shortcut(true, |s| {
@@ -1375,6 +1421,8 @@ impl UyapApp {
             "Oturumu kapatmak ve çalışan tüm süreçleri durdurmak istediğinize emin misiniz?",
         ) {
             self.stop_sharing(false);
+            self.oturum_birak();
+            self.oturum_mesaj = None;
             std::thread::spawn(|| crate::veritabani::durdur(&|_| {}));
             self.username.clear();
             self.password.clear();
@@ -1388,6 +1436,7 @@ impl UyapApp {
     fn on_close(&mut self) {
         self.is_sharing = false;
         self.stop_sharing(false);
+        self.oturum_birak();
         crate::veritabani::durdur(&|_| {});
         std::process::exit(0);
     }
@@ -2126,7 +2175,9 @@ impl UyapApp {
                                 if panel_ogesi(&mut cui, "Bağlantıyı paylaş") || enter { eylem = Some(7); }
                                 ayrac(&mut cui);
                             }
-                            if panel_ogesi(&mut cui, "UYAP'ı aç") { eylem = Some(5); }
+                            // İstemcide oturum alınmamışsa aynı madde oturumu alır (uyap_ac → oturum_al)
+                            let ac_metni = if self.sunucu_mu() || self.oturum_dur.is_some() { "UYAP'ı aç" } else { "Var olan oturumu al" };
+                            if panel_ogesi(&mut cui, ac_metni) { eylem = Some(5); }
                             if panel_ogesi(&mut cui, "Pencereyi aç") { eylem = Some(1); }
                             let tema_metni = if self.tepsi_tema_acik { "Tema  ▾" } else { "Tema  ▸" };
                             if panel_ogesi(&mut cui, tema_metni) { self.tepsi_tema_acik = !self.tepsi_tema_acik; }
@@ -2224,8 +2275,8 @@ impl UyapApp {
     }
 
     fn ui_conn_tab(&mut self, ui: &mut egui::Ui) {
-        // Tek kart: Bağlantı Paylaş. "Bağlantı Al" ve işlem günlüğü kaldırıldı (kullanıcı isteği 2026-11-14);
-        // günlük şifreli dosyaya yazılır, ekranda yalnız tek satır durum. Küçük pencerede kaydırılır.
+        // Bağlantı Paylaş kartı; sunucu olmayan bilgisayarda üstte "Ofis oturumu" kartı (Var olan oturumu al,
+        // 26.11.2026). İşlem günlüğü şifreli dosyaya yazılır, ekranda yalnız tek satır durum. Küçük pencerede kaydırılır.
         egui::ScrollArea::vertical()
             .id_salt("baglanti_kaydir")
             .auto_shrink([false, false])
@@ -2238,6 +2289,22 @@ impl UyapApp {
                     ui.add_space(sol_pay);
                     ui.vertical(|ui| {
                         ui.set_width(kart_w);
+                        if !self.sunucu_mu() {
+                            egui::Frame::none()
+                                .fill(C::CARD())
+                                .stroke(egui::Stroke::new(1.0, C::CARD_EDGE()))
+                                .rounding(egui::Rounding::same(14.0))
+                                .inner_margin(egui::Margin::symmetric(22.0, 20.0))
+                                .show(ui, |ui| {
+                                    ui.set_width(kart_w - 44.0);
+                                    ui.label(egui::RichText::new("Ofis oturumu").font(Fonts::card_t()).color(C::INK()));
+                                    ui.add_space(10.0);
+                                    self.buyuk_durum(ui);
+                                    ui.add_space(12.0);
+                                    self.oturum_dugmeleri(ui);
+                                });
+                            ui.add_space(12.0);
+                        }
                         egui::Frame::none()
                             .fill(C::CARD())
                             .stroke(egui::Stroke::new(1.0, C::CARD_EDGE()))
@@ -2358,7 +2425,7 @@ impl UyapApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(LOGIN_CARD_W, 360.0)));
     }
 
-    /// UYAP'ı aç: ofis sunucusunda yerel vekil (paylaşım açık olmalı); istemcide web sitesi (ofise tünel).
+    /// UYAP'ı aç: ofis sunucusunda yerel vekil (paylaşım açık olmalı); istemcide "Var olan oturumu al".
     fn uyap_ac(&mut self) {
         if self.screen == ScreenMode::Login {
             #[cfg(windows)]
@@ -2368,12 +2435,112 @@ impl UyapApp {
         if self.sunucu_mu() {
             uyap_tarayicida_ac(Some(self.log_tx.clone()));
         } else {
-            let adres = format!("{}/", self.api_base());
-            let _ = if cfg!(windows) {
-                Command::new("cmd").args(["/C", "start", "", &adres]).creation_flags_win().spawn()
-            } else {
-                Command::new("xdg-open").arg(&adres).spawn()
-            };
+            self.oturum_al();
+        }
+    }
+
+    fn web_sitesini_ac(&self) {
+        let adres = format!("{}/", self.api_base());
+        let _ = if cfg!(windows) {
+            Command::new("cmd").args(["/C", "start", "", &adres]).creation_flags_win().spawn()
+        } else {
+            Command::new("xdg-open").arg(&adres).spawn()
+        };
+    }
+
+    /// Oturum alma sürüyor mu (sonuç bekleniyor, vekil henüz yok).
+    fn oturum_aliniyor(&self) -> bool {
+        self.oturum_rx.is_some() && self.oturum_dur.is_none()
+    }
+
+    /// "Var olan oturumu al" (26.11.2026): ofisin yerel ağ bilgisi cokluuyap.com'dan alınır; aynı ağdaysa bu
+    /// bilgisayarda 127.0.0.1:8800 vekili açılıp UYAP tarayıcıda oradan açılır, değilse cokluuyap.com açılır.
+    /// Vekil zaten açıksa yalnız tarayıcı açılır.
+    fn oturum_al(&mut self) {
+        if self.oturum_dur.is_some() {
+            uyap_tarayicida_ac(Some(self.log_tx.clone()));
+            return;
+        }
+        if self.oturum_aliniyor() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        crate::oturum_al::baslat(
+            self.server_url.clone(),
+            self.username.clone(),
+            self.office_code.clone(),
+            self.password.clone(),
+            tx,
+            self.log_tx.clone(),
+        );
+        self.oturum_rx = Some(rx);
+        self.oturum_mesaj = None;
+    }
+
+    fn oturum_birak(&mut self) {
+        if let Some(d) = self.oturum_dur.take() {
+            let _ = d.send(());
+        }
+        self.oturum_ip.clear();
+    }
+
+    fn oturum_yokla(&mut self) {
+        use crate::oturum_al::Sonuc;
+        let gelen: Vec<Sonuc> = self.oturum_rx.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
+        for s in gelen {
+            match s {
+                Sonuc::Yerel { ip, kisi, dur } => {
+                    self.oturum_dur = Some(dur);
+                    self.oturum_ip = ip;
+                    self.oturum_mesaj = (!kisi).then(|| {
+                        (false, "Kişiye özel giriş yapılamadı; İş Listesi'nde işler ofis hesabı adına görünür.".to_string())
+                    });
+                    uyap_tarayicida_ac(Some(self.log_tx.clone()));
+                }
+                Sonuc::Web(neden) => {
+                    self.log(&format!("[i] Yerel ağdan bağlanılamadı ({neden}); cokluuyap.com açılıyor."));
+                    self.web_sitesini_ac();
+                    self.oturum_mesaj = Some((false, format!("Aynı ağda değilsiniz: UYAP cokluuyap.com üzerinden açıldı ({neden}).")));
+                    self.oturum_rx = None;
+                }
+                Sonuc::Hata(m) => {
+                    self.log(&format!("[!] Ofis oturumu alınamadı: {m}"));
+                    self.oturum_mesaj = Some((true, m));
+                    self.oturum_rx = None;
+                }
+                Sonuc::Bitti(m) => {
+                    self.oturum_dur = None;
+                    self.oturum_ip.clear();
+                    self.oturum_rx = None;
+                    self.oturum_mesaj = Some((false, m));
+                }
+            }
+        }
+    }
+
+    /// İstemcinin oturum düğmeleri (sade panel ve Kontrol Ekranı ortak).
+    fn oturum_dugmeleri(&mut self, ui: &mut egui::Ui) {
+        if self.oturum_dur.is_some() {
+            if RoundButton::new("UYAP'ı aç").kind(ButtonKind::Primary).font(Fonts::nav_b()).height(42.0).fill_width(true).show(ui).clicked() {
+                uyap_tarayicida_ac(Some(self.log_tx.clone()));
+            }
+            ui.add_space(8.0);
+            if RoundButton::new("Bağlantıyı bırak").kind(ButtonKind::Ghost).font(Fonts::nav_b()).height(36.0).fill_width(true).show(ui).clicked() {
+                self.oturum_birak();
+            }
+        } else {
+            let aliniyor = self.oturum_aliniyor();
+            if RoundButton::new(if aliniyor { "Ofis oturumu alınıyor…" } else { "Var olan oturumu al" })
+                .kind(ButtonKind::Primary)
+                .font(Fonts::nav_b())
+                .height(42.0)
+                .fill_width(true)
+                .enabled(!aliniyor)
+                .show(ui)
+                .clicked()
+            {
+                self.oturum_al();
+            }
         }
     }
 
@@ -2506,15 +2673,8 @@ impl UyapApp {
                             self.start_sharing();
                         }
                     }
-                } else if RoundButton::new("UYAP'ı aç")
-                    .kind(ButtonKind::Primary)
-                    .font(Fonts::nav_b())
-                    .height(42.0)
-                    .fill_width(true)
-                    .show(&mut c)
-                    .clicked()
-                {
-                    self.uyap_ac();
+                } else {
+                    self.oturum_dugmeleri(&mut c);
                 }
 
                 c.add_space(14.0);
@@ -2563,7 +2723,20 @@ impl UyapApp {
         const SARI: egui::Color32 = egui::Color32::from_rgb(0xD4, 0xA0, 0x17);
         const KIRMIZI: egui::Color32 = egui::Color32::from_rgb(0xC6, 0x3B, 0x2F);
         let (renk, baslik, ayrinti, doner): (egui::Color32, String, String, bool) = if !self.sunucu_mu() {
-            (YESIL, "Giriş yapıldı".into(), "UYAP'ı açınca ofis bağlantısı kurulur.".into(), false)
+            if self.oturum_dur.is_some() {
+                let mut a = format!("Yerel ağdan bağlı ({}). UYAP bu bilgisayarda 127.0.0.1:8800 üzerinden açılır.", self.oturum_ip);
+                if let Some((_, m)) = &self.oturum_mesaj {
+                    a.push(' ');
+                    a.push_str(m);
+                }
+                (YESIL, "Ofis oturumu alındı".into(), a, false)
+            } else if self.oturum_aliniyor() {
+                (SARI, "Ofis oturumu alınıyor…".into(), "Ofis sunucusu aranıyor; aynı ağdaysanız doğrudan bağlanılır.".into(), true)
+            } else if let Some((hata, m)) = &self.oturum_mesaj {
+                (if *hata { KIRMIZI } else { SARI }, if *hata { "Ofis oturumu alınamadı".into() } else { "Bilgi".into() }, m.clone(), false)
+            } else {
+                (YESIL, "Giriş yapıldı".into(), "\"Var olan oturumu al\" ile ofisin UYAP oturumunu bu bilgisayarda açın.".into(), false)
+            }
         } else {
             match &self.durum {
                 BaglantiDurumu::Kapali => (
@@ -2872,6 +3045,7 @@ impl eframe::App for UyapApp {
 
         self.poll_logs();
         self.poll_background(ctx);
+        self.oturum_yokla();
         if self.kare % 5 == 0 {
             self.durum_yokla();
         }

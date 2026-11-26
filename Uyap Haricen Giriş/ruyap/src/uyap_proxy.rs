@@ -6621,6 +6621,21 @@ fn _yerel_tarayici_cerezi_gecerli(headers: &HeaderMap) -> bool {
     !deger.is_empty() && constant_time_eq(&deger, &GW_BROWSER_SECRET)
 }
 
+// İstemci bilgisayarın yerel vekili (oturum_al.rs) aynı yerel giriş kuralını kullanır: program jetonu ya da
+// "UYAP'ı aç" ile verilen tek kullanımlık koddan doğan çerez.
+pub fn yerel_cerez_gecerli(headers: &HeaderMap) -> bool {
+    _yerel_tarayici_cerezi_gecerli(headers)
+}
+pub fn yerel_jeton_gecerli(sunulan: &str) -> bool {
+    !sunulan.is_empty() && GW_LOCAL_TOKEN.lock().as_deref().is_some_and(|t| constant_time_eq(sunulan, t))
+}
+pub fn yerel_giris_sayfasi() -> &'static str {
+    _YEREL_GIRIS_SAYFASI
+}
+pub fn cerez_degeri(headers: &HeaderMap, ad: &str) -> String {
+    extract_cookie(headers, ad)
+}
+
 pub fn _guvenli_hedef(hedef: &str) -> String {
     let h = hedef.trim();
     if !h.starts_with('/') || h.starts_with("//") || h.starts_with("/\\") {
@@ -6681,7 +6696,7 @@ border-radius:8px'>{}</p>",
 border-radius:16px;padding:24px 26px;box-shadow:0 14px 40px rgba(96,86,66,.14)'>\
 <h2 style='margin-top:0'>Ofis UYAP Girişi</h2>\
 <p style='font-size:13px;color:#8C867B'>Bu bilgisayar ofisin UYAP oturumunu yerel ağda paylaşıyor. \
-Programdan (<b>Bağlantıyı Al → Tarayıcıyı Aç</b>) bağlanıyorsanız bu ekranı görmezsiniz. \
+Programdan (<b>Var olan oturumu al</b>) bağlanıyorsanız bu ekranı görmezsiniz. \
 Doğrudan bağlanmak için <b>kendi Çoklu UYAP kullanıcı adınızı ve parolanızı</b> yazın (İş Listesi işlerinizi sizin adınıza gösterir).</p>\
 {}\
 <form method='post' action='/__uyap_lan__/giris' autocomplete='off'>\
@@ -6705,8 +6720,8 @@ const _YEREL_GIRIS_SAYFASI: &str = "<!doctype html><html lang='tr'><meta charset
 <body style='font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:60px auto;line-height:1.5'>\
 <h2>UYAP'ı programdan açın</h2>\
 <p>Güvenlik nedeniyle bu adres artık doğrudan (yer imi ya da elle yazarak) açılamıyor.</p>\
-<p>UyapMasa'daki <b>UYAP Bağlantısı</b> ekranında <b>“Tarayıcıda Aç”</b> düğmesine basın. \
-Program yeniden başlatıldıysa açık sekmeleri de bu düğmeyle yeniden açmanız gerekir.</p>\
+<p>Çoklu UYAP programında <b>“UYAP'ı aç”</b> düğmesine basın (ofis sunucusu olmayan bilgisayarda önce \
+<b>“Var olan oturumu al”</b>). Program yeniden başlatıldıysa açık sekmeleri de bu düğmeyle yeniden açmanız gerekir.</p>\
 </body></html>";
 
 const _AUTH_PENCERE_SN: Duration = Duration::from_secs(15 * 60);
