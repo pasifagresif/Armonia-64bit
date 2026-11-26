@@ -58,6 +58,10 @@ interface Sekme {
 
 let sekmeler: Sekme[] = [];
 let etkin: Sekme | null = null;
+/** Tek belge kipi: editör bir sayfanın içinde çerçevede (ÇokluUYAP Yazı penceresi, enjekte/yazi.js) ya da `?tek`
+ * ile açıldıysa. Kabuk büro kaydı / bağlı dosya / imza durumunu tek belge için tutar; sekmeler açılsaydı A'nın büro
+ * kaydının üzerine B yazılabilirdi. Açılan ya da yeni belge öndekinin yerine geçer, sekme çubuğu gizlenir. */
+const TEK_BELGE = window.self !== window.top || new URLSearchParams(location.search).has("tek");
 // Etkin sekmenin editörü (etkinlestir() eşitler)
 let gorunum: EditorView | null = null;
 /** Biçimsiz metnin yazısı (belgenin hvl-default stili): seçiciler biçim işareti yoksa bunu gösterir. */
@@ -267,8 +271,10 @@ function sayfayiKur(a: Acilis, bilgi: Acik): Sekme {
           "Mod-z": undo, "Mod-y": redo, "Mod-Shift-z": redo,
           "Mod-b": kalin, "Mod-i": egik, "Mod-u": alti,
           "Mod-s": () => { kaydet(); return true; },
-          "Mod-n": () => { yeniBelge(); return true; },
-          "Mod-w": () => { if (etkin) sekmeKapat(etkin); return true; },
+          // Tek belge kipinde Ctrl+N araç çubuğundaki "Yeni"ye basar: kabuk (yazi.js) tıklamayı görüp önceki belgenin
+          // büro kaydını bırakır; doğrudan yeniBelge() yeni belgeyi eski kaydın üzerine kaydettirebilirdi.
+          "Mod-n": () => { if (TEK_BELGE) yeniDugmesi()?.click(); else yeniBelge(); return true; },
+          "Mod-w": () => { if (etkin && !TEK_BELGE) sekmeKapat(etkin); return true; },
           "Mod-PageDown": () => { komsuSekme(1); return true; },
           "Mod-PageUp": () => { komsuSekme(-1); return true; },
           "Mod-o": () => { acmaIste(); return true; },
@@ -403,7 +409,7 @@ function komsuSekme(yon: 1 | -1) {
 
 function sekmeCubuguCiz() {
   const c = $("#sekmeler");
-  c.hidden = sekmeler.length === 0;
+  c.hidden = TEK_BELGE || sekmeler.length === 0;
   const ogeler: HTMLElement[] = sekmeler.map((s) => {
     const el = document.createElement("div");
     el.className = s === etkin ? "sekme-basligi etkin" : "sekme-basligi";
@@ -484,6 +490,10 @@ function boyutDegisti() {
 /** "Aç": tarayıcıda dosya seçici. Masaüstünde yerli dosya penceresi yok (armonia-yazi@.service'te D-Bus/portal
  * kasıtlı olarak kapalı, denetçi 24.11 O4); belge Armonia Dosyalar'da çift tıklanarak açılır (kullanıcı kararı
  * 25.11). Claude, 2026-11-25. */
+function yeniDugmesi(): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll<HTMLButtonElement>("#arac-cubugu button")].find((b) => b.textContent?.trim() === "Yeni");
+}
+
 async function acmaIste() {
   if (!masaustu) {
     $<HTMLInputElement>("#dosya").click();
@@ -535,7 +545,7 @@ function yeniBelge(tekrarsiz = false) {
   etkiniGizle();
   const s = sayfayiKur({ belge, gorunum: g, imzali: false, uyarilar: [] },
     { belge, kok: "Yeni belge", bicim: "udf", gorunum: g, salt: false, yeni: true });
-  sekmeEkle_(s);
+  sekmeEkle_(s, TEK_BELGE ? etkin : null);
   // Büroda varsayılan antet varsa yeni belge onunla açılır (Çoklu UYAP → Ayarlar → Antetlerim)
   const k = kabuk();
   if (k) {
@@ -645,7 +655,7 @@ async function belgeAc(ad: string, bayt: Uint8Array, kimlik?: number, yerine?: S
     const a = belge_ac(bayt) as Acilis & { tur: "udf" | "docx" };
     etkiniGizle();
     const s = sayfayiKur(a, { belge: a.belge, kok: ad.replace(/\.(udf|docx)$/i, ""), bicim: a.tur, gorunum: a.gorunum, kimlik, salt: a.imzali });
-    sekmeEkle_(s, yerine ?? (bosYeniMi(etkin) ? etkin : null));
+    sekmeEkle_(s, yerine ?? (TEK_BELGE || bosYeniMi(etkin) ? etkin : null));
     antetMenusuDoldur();
     const notlar: string[] = [];
     if (a.uyarilar.length) notlar.push("Korunamayan öğeler: " + a.uyarilar.join("; "));
